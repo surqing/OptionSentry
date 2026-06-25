@@ -1,0 +1,11 @@
+[project]
+name = "kuaiqi"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.11"
+dependencies = [
+    "tqsdk>=3.10.1",
+]
+
+[project.scripts]
+kuaiqi = "kuaiqi.cli:main"
