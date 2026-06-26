@@ -11,7 +11,7 @@ class GuiSmokeTests(unittest.TestCase):
         from PyQt6.QtWidgets import QApplication
 
         from kuaiqi.config import parse_config
-        from kuaiqi.gui.app import LoginWindow, MainWindow
+        from kuaiqi.gui.app import LoginWindow, MainWindow, _double_spin, _spin
         from kuaiqi.gui.credentials import CredentialResolution
 
         app = QApplication.instance() or QApplication([])
@@ -26,6 +26,33 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertIsNotNone(app)
         self.assertEqual(window.windowTitle(), "KuaiQi 登录")
         self.assertEqual(main_window.config_editor.build_config().runtime.mode, "live")
+        main_window._set_running(True)
+        self.assertTrue(main_window.config_editor.isEnabled())
+        self.assertTrue(main_window.save_action.isEnabled())
+        self.assertTrue(main_window.reload_action.isEnabled())
+        self.assertFalse(main_window.start_button.isEnabled())
+        self.assertTrue(main_window.stop_button.isEnabled())
+
+        spin = _spin(0, 10)
+        spin.setValue(5)
+        event = _FakeWheelEvent()
+        spin.wheelEvent(event)
+        self.assertEqual(spin.value(), 5)
+        self.assertTrue(event.ignored)
+
+        double_spin = _double_spin()
+        double_spin.setValue(5.5)
+        event = _FakeWheelEvent()
+        double_spin.wheelEvent(event)
+        self.assertEqual(double_spin.value(), 5.5)
+        self.assertTrue(event.ignored)
+
+
+class _FakeWheelEvent:
+    ignored = False
+
+    def ignore(self) -> None:
+        self.ignored = True
 
 
 if __name__ == "__main__":

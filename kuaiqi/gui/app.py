@@ -405,9 +405,6 @@ class MainWindow(QMainWindow):
             _append_evaluation_row(self.active_table, timestamp, evaluation)
 
     def _save_config(self) -> None:
-        if self._running:
-            QMessageBox.information(self, "监控运行中", "停止监控后再保存配置。")
-            return
         try:
             config = self.config_editor.build_config()
             save_config(self.config_path, config)
@@ -415,12 +412,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "保存失败", str(exc))
             return
         self.config = config
-        self._append_log(f"Saved config: {self.config_path}")
+        suffix = "；当前监控继续使用启动时的配置" if self._running else ""
+        self._append_log(f"Saved config: {self.config_path}{suffix}")
 
     def _reload_config(self) -> None:
-        if self._running:
-            QMessageBox.information(self, "监控运行中", "停止监控后再重新加载配置。")
-            return
         try:
             config = load_config(self.config_path)
         except Exception as exc:
@@ -428,15 +423,13 @@ class MainWindow(QMainWindow):
             return
         self.config = config
         self._load_config_into_editor(config)
-        self._append_log(f"Reloaded config: {self.config_path}")
+        suffix = "；当前监控继续使用启动时的配置" if self._running else ""
+        self._append_log(f"Reloaded config: {self.config_path}{suffix}")
 
     def _set_running(self, running: bool) -> None:
         self._running = running
         self.start_button.setEnabled(not running)
         self.stop_button.setEnabled(running)
-        self.config_editor.setEnabled(not running)
-        self.save_action.setEnabled(not running)
-        self.reload_action.setEnabled(not running)
         if not running:
             self._set_status("status", "stopped")
 
@@ -788,14 +781,24 @@ def _table_text(table: QTableWidget, row: int, column: int) -> str:
     return item.text().strip() if item is not None else ""
 
 
+class NoWheelSpinBox(QSpinBox):
+    def wheelEvent(self, event: Any) -> None:
+        event.ignore()
+
+
+class NoWheelDoubleSpinBox(QDoubleSpinBox):
+    def wheelEvent(self, event: Any) -> None:
+        event.ignore()
+
+
 def _spin(minimum: int, maximum: int) -> QSpinBox:
-    spin = QSpinBox()
+    spin = NoWheelSpinBox()
     spin.setRange(minimum, maximum)
     return spin
 
 
 def _double_spin() -> QDoubleSpinBox:
-    spin = QDoubleSpinBox()
+    spin = NoWheelDoubleSpinBox()
     spin.setRange(0, 1_000_000_000)
     spin.setDecimals(4)
     return spin
