@@ -12,3 +12,7 @@ dependencies = [
 [project.scripts]
 kuaiqi = "kuaiqi.cli:main"
 kuaiqi-gui = "kuaiqi.gui.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
