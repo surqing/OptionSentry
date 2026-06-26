@@ -300,7 +300,7 @@ class MainWindow(QMainWindow):
 
         self.active_table = QTableWidget(0, 6)
         self.active_table.setHorizontalHeaderLabels(("时间", "策略", "值", "阈值", "合约", "消息"))
-        self.active_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        _configure_resizable_columns(self.active_table, (165, 110, 100, 100, 280, 420))
         self.active_table.setAlternatingRowColors(True)
         layout.addWidget(_table_box("当前触发", self.active_table), 1)
         return tab
@@ -310,7 +310,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(tab)
         self.alert_table = QTableWidget(0, 6)
         self.alert_table.setHorizontalHeaderLabels(("时间", "策略", "值", "阈值", "合约", "消息"))
-        self.alert_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        _configure_resizable_columns(self.alert_table, (165, 110, 100, 100, 280, 420))
         self.alert_table.setAlternatingRowColors(True)
         layout.addWidget(self.alert_table)
         return tab
@@ -389,7 +389,7 @@ class MainWindow(QMainWindow):
         self._set_status("cycles", str(cycle.cycle_count))
         self._set_status("active", str(cycle.active_count))
         self._set_status("alerts", str(cycle.total_alerts))
-        self._set_status("timestamp", cycle.timestamp)
+        self._set_status("timestamp", _format_status_timestamp(cycle.timestamp))
         self._populate_active_table(cycle.timestamp, cycle.evaluations)
 
     def _on_alert(self, event: AlertEvent) -> None:
@@ -526,12 +526,7 @@ class ConfigEditor(QWidget):
         self.strategies.verticalHeader().setDefaultSectionSize(36)
         self.strategies.verticalHeader().setMinimumSectionSize(32)
         self.strategies.verticalHeader().setVisible(False)
-        header = self.strategies.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self.strategies.setColumnWidth(0, 70)
+        _configure_resizable_columns(self.strategies, (70, 130, 110, 180))
         layout.addWidget(self.strategies)
         self.content_layout.addWidget(box)
 
@@ -764,6 +759,14 @@ def _table_box(title: str, table: QTableWidget) -> QGroupBox:
     return box
 
 
+def _configure_resizable_columns(table: QTableWidget, widths: tuple[int, ...]) -> None:
+    header = table.horizontalHeader()
+    header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+    header.setMinimumSectionSize(50)
+    for column, width in enumerate(widths):
+        table.setColumnWidth(column, width)
+
+
 def _append_event_row(
     table: QTableWidget,
     event: AlertEvent,
@@ -813,6 +816,23 @@ def _format_table_timestamp(timestamp: str) -> str:
         pass
     if len(value) >= 19 and value[10] in (" ", "T") and value[13] == ":" and value[16] == ":":
         return value[:19].replace("T", " ")
+    return value
+
+
+def _format_status_timestamp(timestamp: str) -> str:
+    value = str(timestamp).strip()
+    if not value:
+        return ""
+    with_tz = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(with_tz)
+        return f"{parsed:%Y-%m-%d %H:%M:%S}.{parsed.microsecond // 100000}"
+    except ValueError:
+        pass
+    if len(value) >= 19 and value[10] in (" ", "T") and value[13] == ":" and value[16] == ":":
+        base = value[:19].replace("T", " ")
+        fraction = value[20:21] if len(value) > 20 and value[19] == "." else "0"
+        return f"{base}.{fraction}"
     return value
 
 

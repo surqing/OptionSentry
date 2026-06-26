@@ -10,7 +10,7 @@ from kuaiqi.models import AlertEvent, ConditionEvaluation
 class GuiSmokeTests(unittest.TestCase):
     def test_pyqt_login_window_constructs_offscreen(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtWidgets import QApplication, QHeaderView
         from PyQt6.QtCore import Qt
 
         from kuaiqi.config import parse_config
@@ -19,10 +19,12 @@ class GuiSmokeTests(unittest.TestCase):
             MainWindow,
             _apply_style,
             _double_spin,
+            _format_status_timestamp,
             _format_table_timestamp,
             _spin,
         )
         from kuaiqi.gui.credentials import CredentialResolution
+        from kuaiqi.runner import RunnerCycle
 
         app = QApplication.instance() or QApplication([])
         _apply_style(app)
@@ -65,11 +67,43 @@ class GuiSmokeTests(unittest.TestCase):
             _format_table_timestamp("2026-06-26 23:41:05.000000"),
             "2026-06-26 23:41:05",
         )
+        self.assertEqual(
+            _format_status_timestamp("2026-06-26 23:41:05.123456"),
+            "2026-06-26 23:41:05.1",
+        )
+        self.assertEqual(
+            _format_status_timestamp("2026-06-26 23:41:05"),
+            "2026-06-26 23:41:05.0",
+        )
+        for table in (
+            main_window.active_table,
+            main_window.alert_table,
+            main_window.config_editor.strategies,
+        ):
+            self.assertEqual(
+                table.horizontalHeader().sectionResizeMode(0),
+                QHeaderView.ResizeMode.Interactive,
+            )
 
         main_window.tabs.setCurrentIndex(2)
         main_window._on_alert(_alert_event("2026-06-26 23:41:05.000000"))
         self.assertEqual(main_window.tabs.currentIndex(), 2)
         self.assertEqual(main_window.alert_table.item(0, 0).text(), "2026-06-26 23:41:05")
+
+        main_window._on_cycle(
+            RunnerCycle(
+                cycle_count=1,
+                timestamp="2026-06-26 23:41:05.987654",
+                evaluations=(),
+                total_conditions=0,
+                active_count=0,
+                alerts=(),
+                total_alerts=0,
+                changed_count=0,
+                compute_ms=0.0,
+            )
+        )
+        self.assertEqual(main_window.status_labels["timestamp"].text(), "2026-06-26 23:41:05.9")
 
         main_window.tabs.setCurrentIndex(1)
         for index in range(80):
