@@ -1,0 +1,67 @@
+from __future__ import annotations
+
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+from kuaiqi.config import parse_config
+from kuaiqi.gui.config_store import config_to_data, save_config
+
+
+class GuiConfigStoreTests(unittest.TestCase):
+    def test_save_config_preserves_existing_comments_and_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "config.toml"
+            path.write_text(
+                "# keep this comment\n"
+                "[runtime]\n"
+                'mode = "live"\n'
+                'price_basis = "last"\n\n'
+                "[[strategies]]\n"
+                'type = "cp_combo"\n'
+                "threshold = 0.01\n",
+                encoding="utf-8",
+            )
+            config = parse_config(
+                {
+                    "runtime": {"mode": "backtest"},
+                    "backtest": {"start_dt": "2026-01-02", "end_dt": "2026-01-05"},
+                    "universe": {"mode": "symbols", "symbols": ["SHFE.au2608C600"]},
+                    "datasource": {
+                        "tqsdk": {
+                            "username_env": "TQSDK_USERNAME",
+                            "password_env": "TQSDK_PASSWORD",
+                        }
+                    },
+                    "strategies": [
+                        {"type": "cp_combo", "threshold": 0.02},
+                        {"type": "abs_spread", "threshold": 0.1, "name": "spread"},
+                    ],
+                }
+            )
+
+            save_config(path, config)
+            text = path.read_text(encoding="utf-8")
+            saved = parse_config(config_to_data(config))
+
+            self.assertIn("# keep this comment", text)
+            self.assertIn('mode = "backtest"', text)
+            self.assertEqual(saved.runtime.mode, "backtest")
+            self.assertEqual(len(saved.strategies), 2)
+
+    def test_save_config_does_not_write_environment_secret_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "config.toml"
+            os.environ["TQSDK_PASSWORD"] = "super-secret"
+            config = parse_config({"strategies": [{"type": "cp_combo", "threshold": 0.01}]})
+
+            save_config(path, config)
+
+            text = path.read_text(encoding="utf-8")
+            self.assertIn('password_env = "TQSDK_PASSWORD"', text)
+            self.assertNotIn("super-secret", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -7,7 +7,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from kuaiqi.config import AppConfig, ConfigError
 from kuaiqi.models import InstrumentMeta, MarketSnapshot, Universe
@@ -21,6 +21,7 @@ LIQUIDITY_FILTER_TIMEOUT_SECONDS = 30
 class TqSdkDataSource:
     config: AppConfig
     logger: logging.Logger
+    stop_requested: Callable[[], bool] | None = None
     _live_api: Any | None = field(default=None, init=False, repr=False)
 
     def discover_universe(self) -> Universe:
@@ -88,6 +89,8 @@ class TqSdkDataSource:
             len(groups),
         )
         for index, group in enumerate(groups, start=1):
+            if self._should_stop():
+                return
             self.logger.info(
                 "Starting backtest group %s/%s with %s symbols.",
                 index,
@@ -269,8 +272,8 @@ class TqSdkDataSource:
             self.logger.info("Subscribed live quotes: %s", len(quotes))
             prices: dict[str, float] = {}
             initialized = False
-            while True:
-                updated = api.wait_update()
+            while not self._should_stop():
+                updated = api.wait_update(deadline=time.time() + 1)
                 if not updated:
                     continue
                 changed_symbols: set[str] = set()
@@ -366,7 +369,7 @@ class TqSdkDataSource:
             )
             initial_deadline = time.time() + initial_timeout
 
-            while True:
+            while not self._should_stop():
                 row_dt, prices, synced = self._collect_synced_backtest_prices(serials, symbols)
                 ready_count = len(prices)
                 now = time.time()
@@ -404,7 +407,7 @@ class TqSdkDataSource:
                         f"Missing {len(missing)} symbols, first 20: {missing[:20]}"
                     )
                 try:
-                    api.wait_update(deadline=time.time() + 5 if not initialized else None)
+                    api.wait_update(deadline=time.time() + 5 if not initialized else time.time() + 1)
                 except BacktestFinished:
                     break
         except Exception:
@@ -437,6 +440,8 @@ class TqSdkDataSource:
             )
             task = api.create_task(subscribe_batch())
             while not task.done():
+                if self._should_stop():
+                    raise ConfigError("Backtest subscription stopped by user.")
                 try:
                     api.wait_update(deadline=time.time() + 5)
                 except BacktestFinished as exc:
@@ -475,6 +480,8 @@ class TqSdkDataSource:
         last_ready_count = -1
         last_wait_log = 0.0
         while True:
+            if self._should_stop():
+                raise ConfigError("Backtest initialization stopped by user.")
             _, prices, _ = self._collect_synced_backtest_prices(serials, batch)
             ready_count = len(prices)
             download_count = sum(1 for symbol in batch if api.is_serial_ready(serials[symbol]))
@@ -560,6 +567,9 @@ class TqSdkDataSource:
                 auth=auth,
             )
         return TqApi(auth=auth)
+
+    def _should_stop(self) -> bool:
+        return bool(self.stop_requested and self.stop_requested())
 
 
 def _row_to_meta(row: Any, fallback_symbol: str) -> InstrumentMeta:

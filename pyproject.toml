@@ -4,8 +4,11 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
+    "pyqt6>=6.11.0",
+    "tomlkit>=0.15.0",
     "tqsdk>=3.10.1",
 ]
 
 [project.scripts]
 kuaiqi = "kuaiqi.cli:main"
+kuaiqi-gui = "kuaiqi.gui.app:main"

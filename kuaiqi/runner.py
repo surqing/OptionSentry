@@ -2,13 +2,36 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Callable
 
 from kuaiqi.alerts import AlertEngine
 from kuaiqi.data_sources.base import MarketDataSource
-from kuaiqi.models import AlertEvent
+from kuaiqi.models import AlertEvent, ConditionEvaluation, Universe
 from kuaiqi.notifiers import Notifier
 from kuaiqi.strategies import Strategy
+
+
+@dataclass(frozen=True)
+class RunnerCycle:
+    cycle_count: int
+    timestamp: str
+    evaluations: tuple[ConditionEvaluation, ...]
+    total_conditions: int
+    active_count: int
+    alerts: tuple[AlertEvent, ...]
+    total_alerts: int
+    changed_count: int
+    compute_ms: float
+
+
+@dataclass
+class RunnerCallbacks:
+    on_status: Callable[[str], None] | None = None
+    on_universe: Callable[[Universe], None] | None = None
+    on_compiled: Callable[[int, int], None] | None = None
+    on_cycle: Callable[[RunnerCycle], None] | None = None
+    on_alert: Callable[[AlertEvent], None] | None = None
 
 
 @dataclass
@@ -19,6 +42,8 @@ class AlertRunner:
     notifier: Notifier
     logger: logging.Logger
     cycle_summary_interval_seconds: int = 60
+    stop_requested: Callable[[], bool] | None = None
+    callbacks: RunnerCallbacks = field(default_factory=RunnerCallbacks)
 
     def run(self) -> int:
         cycle_count = 0
@@ -30,13 +55,18 @@ class AlertRunner:
         summary_compute_ms = 0.0
         last_summary_at = 0.0
         try:
+            self._emit_status("discovering")
             universe = self.data_source.discover_universe()
+            self._emit_universe(universe)
             if not universe.options:
                 self.logger.warning("Universe has no futures options to evaluate.")
+                self._emit_status("empty_universe")
                 return 0
 
+            self._emit_status("compiling")
             compiled_strategies = tuple(strategy.compile(universe) for strategy in self.strategies)
             total_conditions = sum(strategy.condition_count for strategy in compiled_strategies)
+            self._emit_compiled(len(compiled_strategies), total_conditions)
             self.logger.info(
                 "Compiled alert strategies: strategies=%s total_conditions=%s",
                 len(compiled_strategies),
@@ -45,6 +75,9 @@ class AlertRunner:
 
             initialized = False
             for snapshot in self.data_source.stream(universe):
+                if self._should_stop():
+                    self._emit_status("stopping")
+                    break
                 changed_symbols = None if not initialized else snapshot.changed_symbols
                 started_at = time.perf_counter()
                 evaluations = []
@@ -54,6 +87,7 @@ class AlertRunner:
                 events = self.alert_engine.process(evaluations, snapshot.timestamp)
                 for event in events:
                     self._notify(event)
+                    self._emit_alert(event)
                     alert_count += 1
                 self._flush_notifications()
                 cycle_count += 1
@@ -112,9 +146,26 @@ class AlertRunner:
                     summary_changed_count = 0
                     summary_compute_ms = 0.0
                     last_summary_at = now
+                self._emit_cycle(
+                    RunnerCycle(
+                        cycle_count=cycle_count,
+                        timestamp=snapshot.timestamp,
+                        evaluations=tuple(evaluations),
+                        total_conditions=total_conditions,
+                        active_count=self.alert_engine.active_count(),
+                        alerts=tuple(events),
+                        total_alerts=alert_count,
+                        changed_count=len(snapshot.changed_symbols),
+                        compute_ms=compute_ms,
+                    )
+                )
+                if self._should_stop():
+                    self._emit_status("stopping")
+                    break
         finally:
             self._flush_notifications(force=True)
             self.data_source.close()
+            self._emit_status("stopped")
         self.logger.info("Runner stopped: cycles=%s alerts=%s", cycle_count, alert_count)
         return alert_count
 
@@ -142,3 +193,26 @@ class AlertRunner:
                 type(exc).__name__,
                 exc,
             )
+
+    def _should_stop(self) -> bool:
+        return bool(self.stop_requested and self.stop_requested())
+
+    def _emit_status(self, status: str) -> None:
+        if self.callbacks.on_status is not None:
+            self.callbacks.on_status(status)
+
+    def _emit_universe(self, universe: Universe) -> None:
+        if self.callbacks.on_universe is not None:
+            self.callbacks.on_universe(universe)
+
+    def _emit_compiled(self, strategy_count: int, total_conditions: int) -> None:
+        if self.callbacks.on_compiled is not None:
+            self.callbacks.on_compiled(strategy_count, total_conditions)
+
+    def _emit_cycle(self, cycle: RunnerCycle) -> None:
+        if self.callbacks.on_cycle is not None:
+            self.callbacks.on_cycle(cycle)
+
+    def _emit_alert(self, event: AlertEvent) -> None:
+        if self.callbacks.on_alert is not None:
+            self.callbacks.on_alert(event)
