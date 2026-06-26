@@ -7,6 +7,7 @@ from typing import Any
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -327,7 +328,7 @@ class MainWindow(QMainWindow):
         self._set_status("mode", config.runtime.mode)
         self._set_status("config_path", str(self.config_path))
         self._set_status("credential_source", self.credentials.source)
-        self._set_status("strategies", str(len(config.strategies)))
+        self._set_status("strategies", str(len(config.selected_strategies)))
 
     def _start_monitor(self) -> None:
         if self._running:
@@ -507,7 +508,7 @@ class ConfigEditor(QWidget):
         row = QHBoxLayout()
         add_button = QPushButton("添加")
         add_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
-        add_button.clicked.connect(lambda: self._add_strategy_row("cp_combo", 0.01, ""))
+        add_button.clicked.connect(lambda: self._add_strategy_row("cp_combo", 0.01, "", True))
         remove_button = QPushButton("删除")
         remove_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
         remove_button.clicked.connect(self._remove_strategy_row)
@@ -515,9 +516,21 @@ class ConfigEditor(QWidget):
         row.addWidget(remove_button)
         row.addStretch(1)
         layout.addLayout(row)
-        self.strategies = QTableWidget(0, 3)
-        self.strategies.setHorizontalHeaderLabels(("类型", "阈值", "名称"))
-        self.strategies.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.strategies = QTableWidget(0, 4)
+        self.strategies.setHorizontalHeaderLabels(("选中", "类型", "阈值", "名称"))
+        self.strategies.setAlternatingRowColors(True)
+        self.strategies.setMinimumHeight(180)
+        self.strategies.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.strategies.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.strategies.verticalHeader().setDefaultSectionSize(36)
+        self.strategies.verticalHeader().setMinimumSectionSize(32)
+        self.strategies.verticalHeader().setVisible(False)
+        header = self.strategies.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.strategies.setColumnWidth(0, 70)
         layout.addWidget(self.strategies)
         self.content_layout.addWidget(box)
 
@@ -611,7 +624,7 @@ class ConfigEditor(QWidget):
         self.min_open_interest.setValue(config.universe.min_open_interest)
         self.strategies.setRowCount(0)
         for strategy in config.strategies:
-            self._add_strategy_row(strategy.type, strategy.threshold, strategy.name or "")
+            self._add_strategy_row(strategy.type, strategy.threshold, strategy.name or "", strategy.selected)
         if config.backtest.start_dt is not None:
             self.backtest_start.setText(config.backtest.start_dt.isoformat())
         else:
@@ -711,21 +724,31 @@ class ConfigEditor(QWidget):
     def _strategy_data(self) -> list[dict[str, Any]]:
         rows = []
         for row in range(self.strategies.rowCount()):
-            strategy_type = _table_text(self.strategies, row, 0) or "cp_combo"
-            threshold = float(_table_text(self.strategies, row, 1) or "0")
-            name = _table_text(self.strategies, row, 2)
-            item = {"type": strategy_type, "threshold": threshold}
+            selected = _table_checked(self.strategies, row, 0)
+            strategy_type = _table_text(self.strategies, row, 1) or "cp_combo"
+            threshold = float(_table_text(self.strategies, row, 2) or "0")
+            name = _table_text(self.strategies, row, 3)
+            item = {"type": strategy_type, "threshold": threshold, "selected": selected}
             if name:
                 item["name"] = name
             rows.append(item)
         return rows
 
-    def _add_strategy_row(self, strategy_type: str, threshold: float, name: str) -> None:
+    def _add_strategy_row(self, strategy_type: str, threshold: float, name: str, selected: bool = True) -> None:
         row = self.strategies.rowCount()
         self.strategies.insertRow(row)
-        self.strategies.setItem(row, 0, QTableWidgetItem(strategy_type))
-        self.strategies.setItem(row, 1, QTableWidgetItem(str(threshold)))
-        self.strategies.setItem(row, 2, QTableWidgetItem(name))
+        selected_item = QTableWidgetItem()
+        selected_item.setFlags(
+            Qt.ItemFlag.ItemIsUserCheckable
+            | Qt.ItemFlag.ItemIsEnabled
+            | Qt.ItemFlag.ItemIsSelectable
+        )
+        selected_item.setCheckState(Qt.CheckState.Checked if selected else Qt.CheckState.Unchecked)
+        selected_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.strategies.setItem(row, 0, selected_item)
+        self.strategies.setItem(row, 1, QTableWidgetItem(strategy_type))
+        self.strategies.setItem(row, 2, QTableWidgetItem(str(threshold)))
+        self.strategies.setItem(row, 3, QTableWidgetItem(name))
 
     def _remove_strategy_row(self) -> None:
         row = self.strategies.currentRow()
@@ -779,6 +802,11 @@ def _split_lines(value: str) -> list[str]:
 def _table_text(table: QTableWidget, row: int, column: int) -> str:
     item = table.item(row, column)
     return item.text().strip() if item is not None else ""
+
+
+def _table_checked(table: QTableWidget, row: int, column: int) -> bool:
+    item = table.item(row, column)
+    return item is None or item.checkState() == Qt.CheckState.Checked
 
 
 class NoWheelSpinBox(QSpinBox):

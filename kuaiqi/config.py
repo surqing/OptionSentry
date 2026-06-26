@@ -52,6 +52,7 @@ class StrategyConfig:
     type: str
     threshold: float
     name: str | None = None
+    selected: bool = True
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,10 @@ class AppConfig:
     strategies: tuple[StrategyConfig, ...]
     notifier: NotifierConfig
     logging: LoggingConfig
+
+    @property
+    def selected_strategies(self) -> tuple[StrategyConfig, ...]:
+        return tuple(strategy for strategy in self.strategies if strategy.selected)
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -185,6 +190,7 @@ def _parse_strategies(data: list[dict[str, Any]]) -> tuple[StrategyConfig, ...]:
                 type=str(item["type"]),
                 threshold=float(item["threshold"]),
                 name=str(item["name"]) if item.get("name") is not None else None,
+                selected=bool(item.get("selected", True)),
             )
         )
     return tuple(strategies)

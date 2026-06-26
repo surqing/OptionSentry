@@ -23,11 +23,11 @@ def main(argv: list[str] | None = None) -> int:
         logger.info(
             "Starting KuaiQi mode=%s strategies=%s universe_mode=%s",
             config.runtime.mode,
-            [strategy.type for strategy in config.strategies],
+            [strategy.type for strategy in config.selected_strategies],
             config.universe.mode,
         )
         data_source = TqSdkDataSource(config=config, logger=logger)
-        strategies = tuple(build_strategy(strategy) for strategy in config.strategies)
+        strategies = tuple(build_strategy(strategy) for strategy in config.selected_strategies)
         runner = AlertRunner(
             data_source=data_source,
             strategies=strategies,

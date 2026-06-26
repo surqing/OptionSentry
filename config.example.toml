@@ -23,10 +23,12 @@ quote_subscription_batch_size = 500
 [[strategies]]
 type = "cp_combo"
 threshold = 0.01
+selected = true
 
 [[strategies]]
 type = "abs_spread"
 threshold = 0.1
+selected = true
 
 [backtest]
 start_dt = "2026-01-02"

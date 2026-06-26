@@ -36,7 +36,7 @@ class GuiConfigStoreTests(unittest.TestCase):
                     },
                     "strategies": [
                         {"type": "cp_combo", "threshold": 0.02},
-                        {"type": "abs_spread", "threshold": 0.1, "name": "spread"},
+                        {"type": "abs_spread", "threshold": 0.1, "name": "spread", "selected": False},
                     ],
                 }
             )
@@ -47,8 +47,12 @@ class GuiConfigStoreTests(unittest.TestCase):
 
             self.assertIn("# keep this comment", text)
             self.assertIn('mode = "backtest"', text)
+            self.assertIn("selected = false", text)
             self.assertEqual(saved.runtime.mode, "backtest")
             self.assertEqual(len(saved.strategies), 2)
+            self.assertTrue(saved.strategies[0].selected)
+            self.assertFalse(saved.strategies[1].selected)
+            self.assertEqual([strategy.type for strategy in saved.selected_strategies], ["cp_combo"])
 
     def test_save_config_does_not_write_environment_secret_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -9,6 +9,7 @@ class GuiSmokeTests(unittest.TestCase):
     def test_pyqt_login_window_constructs_offscreen(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import Qt
 
         from kuaiqi.config import parse_config
         from kuaiqi.gui.app import LoginWindow, MainWindow, _double_spin, _spin
@@ -16,7 +17,14 @@ class GuiSmokeTests(unittest.TestCase):
 
         app = QApplication.instance() or QApplication([])
         window = LoginWindow()
-        config = parse_config({"strategies": [{"type": "cp_combo", "threshold": 0.01}]})
+        config = parse_config(
+            {
+                "strategies": [
+                    {"type": "cp_combo", "threshold": 0.01},
+                    {"type": "abs_spread", "threshold": 0.1, "selected": False},
+                ]
+            }
+        )
         main_window = MainWindow(
             Path("config.toml"),
             config,
@@ -26,6 +34,20 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertIsNotNone(app)
         self.assertEqual(window.windowTitle(), "KuaiQi 登录")
         self.assertEqual(main_window.config_editor.build_config().runtime.mode, "live")
+        self.assertEqual(main_window.config_editor.strategies.columnCount(), 4)
+        self.assertGreaterEqual(main_window.config_editor.strategies.minimumHeight(), 180)
+        self.assertEqual(
+            main_window.config_editor.strategies.item(0, 0).checkState(),
+            Qt.CheckState.Checked,
+        )
+        self.assertEqual(
+            main_window.config_editor.strategies.item(1, 0).checkState(),
+            Qt.CheckState.Unchecked,
+        )
+        self.assertEqual(
+            [strategy.type for strategy in main_window.config_editor.build_config().selected_strategies],
+            ["cp_combo"],
+        )
         main_window._set_running(True)
         self.assertTrue(main_window.config_editor.isEnabled())
         self.assertTrue(main_window.save_action.isEnabled())
