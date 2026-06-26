@@ -19,6 +19,9 @@ class AlertEngine:
                 events.append(AlertEvent(timestamp=timestamp, evaluation=evaluation))
         return events
 
+    def active_count(self) -> int:
+        return sum(1 for active in self._states.values() if active)
+
     def _should_alert(self, previous: bool | None, current: bool) -> bool:
         if not current:
             return False

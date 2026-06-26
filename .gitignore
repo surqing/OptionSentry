@@ -32,6 +32,7 @@ dist/
 # Downloaded data and archives
 data/
 downloads/
+test_ouput/
 *.zip
 *.tar
 *.tar.gz
@@ -45,3 +46,4 @@ Thumbs.db
 
 # Codex/local helper state
 .codex_external_skills/
+.agents/

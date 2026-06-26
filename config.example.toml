@@ -6,6 +6,9 @@ alert_on_first_match = false
 [universe]
 mode = "underlyings"
 underlyings = ["SHFE.au2608"]
+# Live-mode liquidity filters. 0 disables the filter; 1 filters out zero values.
+min_volume = 0
+min_open_interest = 0
 # mode = "all"
 # exchange_ids = ["SHFE", "DCE", "CZCE", "INE", "GFEX", "CFFEX"]
 # mode = "symbols"
@@ -14,6 +17,8 @@ underlyings = ["SHFE.au2608"]
 [datasource.tqsdk]
 username_env = "TQSDK_USERNAME"
 password_env = "TQSDK_PASSWORD"
+symbol_info_batch_size = 500
+quote_subscription_batch_size = 500
 
 [[strategies]]
 type = "cp_combo"
@@ -22,7 +27,6 @@ threshold = 0.01
 [[strategies]]
 type = "abs_spread"
 threshold = 0.1
-epsilon = 1e-12
 
 [backtest]
 start_dt = "2026-01-02"
@@ -35,18 +39,30 @@ subscription_batch_size = 50
 [notifier]
 # live defaults to email, backtest defaults to console.
 # kind = "console"
+# Runtime mode is inserted as a subdirectory: logs/live/alerts.jsonl or logs/backtest/alerts.jsonl.
 alert_log_path = "logs/alerts.jsonl"
 
 [notifier.email]
 smtp_host = "smtp.example.com"
 smtp_port = 587
+smtp_timeout_seconds = 10
+# Batch email alerts for this many seconds; 0 sends immediately.
+alert_interval_seconds = 60
 username = "alert@example.com"
 password_env = "SMTP_PASSWORD"
 from_addr = "alert@example.com"
 to_addrs = ["receiver@example.com"]
 use_tls = true
+failure_backoff_seconds = 300
 
 [logging]
 level = "INFO"
+# Runtime mode is inserted as a subdirectory: logs/live/kuaiqi.log or logs/backtest/kuaiqi.log.
 log_dir = "logs"
 log_file = "kuaiqi.log"
+# Rotating logs cap disk usage at about max_bytes * (backup_count + 1).
+max_bytes = 5000000
+backup_count = 5
+# INFO cycle summaries are throttled; per-cycle details are available at DEBUG.
+# Set to 0 to log every cycle.
+cycle_summary_interval_seconds = 60

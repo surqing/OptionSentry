@@ -5,7 +5,7 @@ import math
 import os
 import time
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Iterator
 
@@ -14,15 +14,18 @@ from kuaiqi.models import InstrumentMeta, MarketSnapshot, Universe
 
 
 FUTURE_EXCHANGES = {"CFFEX", "SHFE", "DCE", "CZCE", "INE", "GFEX"}
+LIQUIDITY_FILTER_TIMEOUT_SECONDS = 30
 
 
 @dataclass
 class TqSdkDataSource:
     config: AppConfig
     logger: logging.Logger
+    _live_api: Any | None = field(default=None, init=False, repr=False)
 
     def discover_universe(self) -> Universe:
         api = self._create_api()
+        keep_api_for_live = False
         try:
             option_symbols = self._discover_option_symbols(api)
             if not option_symbols:
@@ -48,6 +51,11 @@ class TqSdkDataSource:
                 for symbol, meta in option_metas.items()
                 if meta.is_option and meta.underlying_symbol in future_underlyings
             }
+            future_underlyings, filtered_options, used_liquidity_quote_scan = self._apply_liquidity_filters(
+                api,
+                future_underlyings,
+                filtered_options,
+            )
             instruments = {**future_underlyings, **filtered_options}
             universe = Universe(instruments=instruments, requested_symbols=tuple(sorted(option_symbols)))
             self.logger.info(
@@ -56,9 +64,19 @@ class TqSdkDataSource:
                 len(universe.futures),
                 len(universe.price_symbols()),
             )
+            if self.config.runtime.mode == "live" and not used_liquidity_quote_scan:
+                self._replace_live_api(api)
+                keep_api_for_live = True
+                self.logger.info("Reusing discovery TqApi connection for live quote subscription.")
+            elif self.config.runtime.mode == "live" and used_liquidity_quote_scan:
+                self.logger.info(
+                    "Closing discovery TqApi connection after liquidity probe; "
+                    "live stream will subscribe filtered symbols with a fresh connection."
+                )
             return universe
         finally:
-            api.close()
+            if not keep_api_for_live:
+                api.close()
 
     def stream(self, universe: Universe) -> Iterator[MarketSnapshot]:
         if self.config.runtime.mode == "live":
@@ -79,7 +97,7 @@ class TqSdkDataSource:
             yield from self._stream_backtest_universe(group)
 
     def close(self) -> None:
-        return None
+        self._close_live_api()
 
     def _discover_option_symbols(self, api: Any) -> list[str]:
         universe_config = self.config.universe
@@ -115,30 +133,146 @@ class TqSdkDataSource:
         if not symbols:
             return {}
         result: dict[str, InstrumentMeta] = {}
-        df = api.query_symbol_info(list(symbols))
         symbol_list = list(symbols)
-        for position, (index, row) in enumerate(df.iterrows()):
-            fallback_symbol = symbol_list[position] if position < len(symbol_list) else str(index)
-            meta = _row_to_meta(row, fallback_symbol)
-            if meta.symbol:
-                result[meta.symbol] = meta
+        batch_size = self.config.tqsdk.symbol_info_batch_size
+        batches = list(_batches(symbol_list, batch_size))
+        if len(batches) > 1:
+            self.logger.info(
+                "Querying symbol metadata in %s batch(es) with batch_size=%s.",
+                len(batches),
+                batch_size,
+            )
+        for batch_index, batch in enumerate(batches, start=1):
+            if len(batches) > 1:
+                self.logger.info(
+                    "Querying symbol metadata batch %s/%s with %s symbols.",
+                    batch_index,
+                    len(batches),
+                    len(batch),
+                )
+            df = api.query_symbol_info(batch)
+            for position, (index, row) in enumerate(df.iterrows()):
+                fallback_symbol = batch[position] if position < len(batch) else str(index)
+                meta = _row_to_meta(row, fallback_symbol)
+                if meta.symbol:
+                    result[meta.symbol] = meta
         return result
+
+    def _apply_liquidity_filters(
+        self,
+        api: Any,
+        future_metas: dict[str, InstrumentMeta],
+        option_metas: dict[str, InstrumentMeta],
+    ) -> tuple[dict[str, InstrumentMeta], dict[str, InstrumentMeta], bool]:
+        min_volume = _config_number(getattr(self.config.universe, "min_volume", 0))
+        min_open_interest = _config_number(getattr(self.config.universe, "min_open_interest", 0))
+        if min_volume <= 0 and min_open_interest <= 0:
+            return future_metas, option_metas, False
+        if self.config.runtime.mode != "live":
+            self.logger.warning("Universe liquidity filters are only applied in live mode.")
+            return future_metas, option_metas, False
+
+        metas = {**future_metas, **option_metas}
+        metrics = {
+            symbol: (meta.volume, meta.open_interest)
+            for symbol, meta in metas.items()
+            if meta.volume is not None or meta.open_interest is not None
+        }
+        missing_metric_symbols = [
+            symbol
+            for symbol, meta in metas.items()
+            if (min_volume > 0 and meta.volume is None)
+            or (min_open_interest > 0 and meta.open_interest is None)
+        ]
+        used_quote_scan = False
+        if missing_metric_symbols:
+            metrics.update(self._query_liquidity_metrics(api, sorted(metas)))
+            used_quote_scan = True
+
+        kept_futures = {
+            symbol: meta
+            for symbol, meta in future_metas.items()
+            if _passes_liquidity_filters(meta, metrics, min_volume, min_open_interest)
+        }
+        kept_options = {
+            symbol: meta
+            for symbol, meta in option_metas.items()
+            if meta.underlying_symbol in kept_futures
+            and _passes_liquidity_filters(meta, metrics, min_volume, min_open_interest)
+        }
+        self.logger.info(
+            "Applied universe liquidity filters: min_volume=%s min_open_interest=%s "
+            "options %s -> %s, futures %s -> %s.",
+            _format_threshold(min_volume),
+            _format_threshold(min_open_interest),
+            len(option_metas),
+            len(kept_options),
+            len(future_metas),
+            len(kept_futures),
+        )
+        return kept_futures, kept_options, used_quote_scan
+
+    def _query_liquidity_metrics(self, api: Any, symbols: list[str]) -> dict[str, tuple[float | None, float | None]]:
+        if not symbols:
+            return {}
+        quotes: dict[str, Any] = {}
+        batch_size = self.config.tqsdk.quote_subscription_batch_size
+        batches = list(_batches(symbols, batch_size))
+        for batch_index, batch in enumerate(batches, start=1):
+            self.logger.info(
+                "Probing liquidity quote batch %s/%s with %s symbols.",
+                batch_index,
+                len(batches),
+                len(batch),
+            )
+            quotes.update(dict(zip(batch, api.get_quote_list(batch), strict=True)))
+            api.wait_update(deadline=time.time() + 5)
+
+        deadline = time.time() + LIQUIDITY_FILTER_TIMEOUT_SECONDS
+        while True:
+            ready_count = sum(1 for quote in quotes.values() if _quote_has_snapshot(quote))
+            if ready_count == len(quotes) or time.time() >= deadline:
+                break
+            api.wait_update(deadline=min(deadline, time.time() + 2))
+
+        ready_count = sum(1 for quote in quotes.values() if _quote_has_snapshot(quote))
+        if ready_count != len(quotes):
+            missing = [
+                symbol
+                for symbol, quote in quotes.items()
+                if not _quote_has_snapshot(quote)
+            ]
+            self.logger.warning(
+                "Liquidity probe received snapshots for %s/%s symbols before timeout; "
+                "missing symbols may be treated as zero. First 20 missing: %s",
+                ready_count,
+                len(quotes),
+                missing[:20],
+            )
+
+        return {
+            symbol: (
+                _optional_float(getattr(quote, "volume", None)),
+                _optional_float(getattr(quote, "open_interest", None)),
+            )
+            for symbol, quote in quotes.items()
+        }
 
     def _stream_live(self, universe: Universe) -> Iterator[MarketSnapshot]:
         symbols = sorted(universe.price_symbols())
         if not symbols:
             self.logger.warning("No symbols to subscribe.")
             return
-        api = self._create_api()
+        api = self._consume_live_api() or self._create_api()
         try:
-            quotes = dict(zip(symbols, api.get_quote_list(symbols), strict=True))
+            quotes = self._subscribe_live_quotes(api, symbols)
             self.logger.info("Subscribed live quotes: %s", len(quotes))
+            prices: dict[str, float] = {}
             initialized = False
             while True:
                 updated = api.wait_update()
                 if not updated:
                     continue
-                prices: dict[str, float] = {}
                 changed_symbols: set[str] = set()
                 timestamp = ""
                 for symbol, quote in quotes.items():
@@ -146,9 +280,13 @@ class TqSdkDataSource:
                     if quote_time and quote_time > timestamp:
                         timestamp = quote_time
                     price = getattr(quote, "last_price", math.nan)
+                    price_changed = api.is_changing(quote, "last_price")
                     if _valid_number(price):
-                        prices[symbol] = float(price)
-                    if api.is_changing(quote, "last_price"):
+                        if price_changed or symbol not in prices:
+                            prices[symbol] = float(price)
+                    elif price_changed:
+                        prices.pop(symbol, None)
+                    if price_changed:
                         changed_symbols.add(symbol)
                 if not prices:
                     continue
@@ -156,7 +294,7 @@ class TqSdkDataSource:
                     initialized = True
                     yield MarketSnapshot(
                         timestamp=timestamp or datetime.now().isoformat(timespec="seconds"),
-                        prices=prices,
+                        prices=dict(prices),
                         changed_symbols=changed_symbols or set(prices),
                         universe=universe,
                     )
@@ -165,6 +303,40 @@ class TqSdkDataSource:
             raise
         finally:
             api.close()
+
+    def _replace_live_api(self, api: Any) -> None:
+        current_api = getattr(self, "_live_api", None)
+        if current_api is not None and current_api is not api:
+            with suppress(Exception):
+                current_api.close()
+        self._live_api = api
+
+    def _consume_live_api(self) -> Any | None:
+        api = getattr(self, "_live_api", None)
+        self._live_api = None
+        return api
+
+    def _close_live_api(self) -> None:
+        api = self._consume_live_api()
+        if api is not None:
+            with suppress(Exception):
+                api.close()
+
+    def _subscribe_live_quotes(self, api: Any, symbols: list[str]) -> dict[str, Any]:
+        quotes: dict[str, Any] = {}
+        batch_size = self.config.tqsdk.quote_subscription_batch_size
+        batches = list(_batches(symbols, batch_size))
+        for batch_index, batch in enumerate(batches, start=1):
+            self.logger.info(
+                "Subscribing live quote batch %s/%s with %s symbols.",
+                batch_index,
+                len(batches),
+                len(batch),
+            )
+            quotes.update(dict(zip(batch, api.get_quote_list(batch), strict=True)))
+            if batch_index < len(batches):
+                api.wait_update(deadline=time.time() + 5)
+        return quotes
 
     def _stream_backtest_universe(self, universe: Universe) -> Iterator[MarketSnapshot]:
         from tqsdk.exceptions import BacktestFinished
@@ -409,6 +581,8 @@ def _row_to_meta(row: Any, fallback_symbol: str) -> InstrumentMeta:
         exercise_month=_optional_int(_row_get(row, "exercise_month")),
         instrument_name=_clean_str(_row_get(row, "instrument_name")),
         product_id=_clean_str(_row_get(row, "product_id")),
+        volume=_optional_float(_row_get(row, "volume")),
+        open_interest=_optional_float(_row_get(row, "open_interest")),
     )
 
 
@@ -450,6 +624,42 @@ def _valid_number(value: Any) -> bool:
     with suppress(TypeError, ValueError):
         return math.isfinite(float(value))
     return False
+
+
+def _config_number(value: Any) -> float:
+    with suppress(TypeError, ValueError):
+        numeric = float(value)
+        if math.isfinite(numeric):
+            return numeric
+    return 0.0
+
+
+def _passes_liquidity_filters(
+    meta: InstrumentMeta,
+    metrics: dict[str, tuple[float | None, float | None]],
+    min_volume: float,
+    min_open_interest: float,
+) -> bool:
+    volume, open_interest = metrics.get(meta.symbol, (meta.volume, meta.open_interest))
+    if min_volume > 0 and not _metric_at_least(volume, min_volume):
+        return False
+    if min_open_interest > 0 and not _metric_at_least(open_interest, min_open_interest):
+        return False
+    return True
+
+
+def _metric_at_least(value: float | None, threshold: float) -> bool:
+    return value is not None and _valid_number(value) and float(value) >= threshold
+
+
+def _quote_has_snapshot(quote: Any) -> bool:
+    return bool(getattr(quote, "datetime", ""))
+
+
+def _format_threshold(value: float) -> str:
+    if value.is_integer():
+        return str(int(value))
+    return str(value)
 
 
 def _valid_datetime(value: Any) -> bool:
@@ -507,6 +717,11 @@ def _order_backtest_symbols(universe: Universe, symbols: list[str]) -> list[str]
     ordered = [symbol for symbol in underlyings if symbol in symbols]
     ordered.extend(symbol for symbol in symbols if symbol not in set(ordered))
     return ordered
+
+
+def _batches(symbols: list[str], batch_size: int) -> Iterator[list[str]]:
+    for index in range(0, len(symbols), batch_size):
+        yield symbols[index:index + batch_size]
 
 
 def _full_symbol(raw_symbol: str, exchange_id: str, fallback_symbol: str) -> str:

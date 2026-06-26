@@ -19,7 +19,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         config = load_config(args.config)
-        logger = setup_logging(config.logging)
+        logger = setup_logging(config.logging, config.runtime.mode)
         logger.info(
             "Starting KuaiQi mode=%s strategies=%s universe_mode=%s",
             config.runtime.mode,
@@ -34,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
             alert_engine=AlertEngine(alert_on_first_match=config.runtime.alert_on_first_match),
             notifier=build_notifier(config),
             logger=logger,
+            cycle_summary_interval_seconds=config.logging.cycle_summary_interval_seconds,
         )
         runner.run()
         return 0

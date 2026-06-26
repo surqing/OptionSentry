@@ -15,6 +15,8 @@ class InstrumentMeta:
     exercise_month: int | None = None
     instrument_name: str = ""
     product_id: str = ""
+    volume: float | None = None
+    open_interest: float | None = None
 
     @property
     def is_option(self) -> bool:

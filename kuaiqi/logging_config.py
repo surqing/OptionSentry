@@ -5,10 +5,11 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from kuaiqi.config import LoggingConfig
+from kuaiqi.log_paths import mode_scoped_dir
 
 
-def setup_logging(config: LoggingConfig) -> logging.Logger:
-    log_dir = Path(config.log_dir)
+def setup_logging(config: LoggingConfig, runtime_mode: str | None = None) -> logging.Logger:
+    log_dir = mode_scoped_dir(Path(config.log_dir), runtime_mode)
     log_dir.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("kuaiqi")
     logger.setLevel(getattr(logging, config.level.upper(), logging.INFO))

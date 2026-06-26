@@ -25,6 +25,8 @@ class UniverseConfig:
     underlyings: tuple[str, ...] = ()
     symbols: tuple[str, ...] = ()
     exchange_ids: tuple[str, ...] = ()
+    min_volume: float = 0.0
+    min_open_interest: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,8 @@ class BacktestConfig:
 class TqSdkConfig:
     username_env: str = "TQSDK_USERNAME"
     password_env: str = "TQSDK_PASSWORD"
+    symbol_info_batch_size: int = 500
+    quote_subscription_batch_size: int = 500
 
 
 @dataclass(frozen=True)
@@ -48,18 +52,20 @@ class StrategyConfig:
     type: str
     threshold: float
     name: str | None = None
-    epsilon: float = 1e-12
 
 
 @dataclass(frozen=True)
 class EmailConfig:
     smtp_host: str | None = None
     smtp_port: int = 587
+    smtp_timeout_seconds: int = 10
+    alert_interval_seconds: int = 60
     username: str | None = None
     password_env: str = "SMTP_PASSWORD"
     from_addr: str | None = None
     to_addrs: tuple[str, ...] = ()
     use_tls: bool = True
+    failure_backoff_seconds: int = 300
 
 
 @dataclass(frozen=True)
@@ -76,6 +82,7 @@ class LoggingConfig:
     log_file: str = "kuaiqi.log"
     max_bytes: int = 5_000_000
     backup_count: int = 5
+    cycle_summary_interval_seconds: int = 60
 
 
 @dataclass(frozen=True)
@@ -107,7 +114,7 @@ def parse_config(data: dict[str, Any]) -> AppConfig:
     strategies = _parse_strategies(data.get("strategies", []))
     notifier = _parse_notifier(data.get("notifier", {}), data.get("notifier.email", {}))
     logging_config = _parse_logging(data.get("logging", {}))
-    _validate_config(runtime, universe, backtest, strategies)
+    _validate_config(runtime, universe, backtest, strategies, logging_config)
     return AppConfig(
         runtime=runtime,
         universe=universe,
@@ -133,6 +140,8 @@ def _parse_universe(data: dict[str, Any]) -> UniverseConfig:
         underlyings=_tuple_of_str(data.get("underlyings", ())),
         symbols=_tuple_of_str(data.get("symbols", ())),
         exchange_ids=_tuple_of_str(data.get("exchange_ids", ())),
+        min_volume=float(data.get("min_volume", 0)),
+        min_open_interest=float(data.get("min_open_interest", 0)),
     )
 
 
@@ -148,9 +157,17 @@ def _parse_backtest(data: dict[str, Any]) -> BacktestConfig:
 
 
 def _parse_tqsdk(data: dict[str, Any]) -> TqSdkConfig:
+    symbol_info_batch_size = int(data.get("symbol_info_batch_size", 500))
+    quote_subscription_batch_size = int(data.get("quote_subscription_batch_size", 500))
+    if symbol_info_batch_size <= 0:
+        raise ConfigError("datasource.tqsdk.symbol_info_batch_size must be positive.")
+    if quote_subscription_batch_size <= 0:
+        raise ConfigError("datasource.tqsdk.quote_subscription_batch_size must be positive.")
     return TqSdkConfig(
         username_env=str(data.get("username_env", "TQSDK_USERNAME")),
         password_env=str(data.get("password_env", "TQSDK_PASSWORD")),
+        symbol_info_batch_size=symbol_info_batch_size,
+        quote_subscription_batch_size=quote_subscription_batch_size,
     )
 
 
@@ -168,7 +185,6 @@ def _parse_strategies(data: list[dict[str, Any]]) -> tuple[StrategyConfig, ...]:
                 type=str(item["type"]),
                 threshold=float(item["threshold"]),
                 name=str(item["name"]) if item.get("name") is not None else None,
-                epsilon=float(item.get("epsilon", 1e-12)),
             )
         )
     return tuple(strategies)
@@ -176,14 +192,20 @@ def _parse_strategies(data: list[dict[str, Any]]) -> tuple[StrategyConfig, ...]:
 
 def _parse_notifier(data: dict[str, Any], flat_email_data: dict[str, Any]) -> NotifierConfig:
     email_data = data.get("email", flat_email_data) or {}
+    alert_interval_seconds = int(email_data.get("alert_interval_seconds", 60))
+    if alert_interval_seconds < 0:
+        raise ConfigError("notifier.email.alert_interval_seconds must be non-negative.")
     email = EmailConfig(
         smtp_host=_env_or_value(email_data.get("smtp_host"), "SMTP_HOST"),
         smtp_port=int(_env_or_value(email_data.get("smtp_port"), "SMTP_PORT") or 587),
+        smtp_timeout_seconds=int(email_data.get("smtp_timeout_seconds", 10)),
+        alert_interval_seconds=alert_interval_seconds,
         username=_env_or_value(email_data.get("username"), "SMTP_USERNAME"),
         password_env=str(email_data.get("password_env", "SMTP_PASSWORD")),
         from_addr=_env_or_value(email_data.get("from_addr"), "ALERT_EMAIL_FROM"),
         to_addrs=_parse_recipients(email_data.get("to_addrs")),
         use_tls=bool(email_data.get("use_tls", True)),
+        failure_backoff_seconds=int(email_data.get("failure_backoff_seconds", 300)),
     )
     return NotifierConfig(
         kind=str(data["kind"]) if data.get("kind") else None,
@@ -199,6 +221,7 @@ def _parse_logging(data: dict[str, Any]) -> LoggingConfig:
         log_file=str(data.get("log_file", "kuaiqi.log")),
         max_bytes=int(data.get("max_bytes", 5_000_000)),
         backup_count=int(data.get("backup_count", 5)),
+        cycle_summary_interval_seconds=int(data.get("cycle_summary_interval_seconds", 60)),
     )
 
 
@@ -207,6 +230,7 @@ def _validate_config(
     universe: UniverseConfig,
     backtest: BacktestConfig,
     strategies: tuple[StrategyConfig, ...],
+    logging_config: LoggingConfig,
 ) -> None:
     if runtime.mode not in {"live", "backtest"}:
         raise ConfigError("runtime.mode must be 'live' or 'backtest'.")
@@ -218,12 +242,22 @@ def _validate_config(
         raise ConfigError("universe.underlyings is required when universe.mode='underlyings'.")
     if universe.mode == "symbols" and not universe.symbols:
         raise ConfigError("universe.symbols is required when universe.mode='symbols'.")
+    if universe.min_volume < 0:
+        raise ConfigError("universe.min_volume must be non-negative.")
+    if universe.min_open_interest < 0:
+        raise ConfigError("universe.min_open_interest must be non-negative.")
     if runtime.mode == "backtest" and (backtest.start_dt is None or backtest.end_dt is None):
         raise ConfigError("backtest.start_dt and backtest.end_dt are required in backtest mode.")
     if runtime.mode == "backtest" and backtest.duration_seconds != 60:
         raise ConfigError("Backtest mode currently supports only 60-second K-lines.")
     if runtime.mode == "backtest" and backtest.subscription_batch_size <= 0:
         raise ConfigError("backtest.subscription_batch_size must be positive.")
+    if logging_config.max_bytes <= 0:
+        raise ConfigError("logging.max_bytes must be positive.")
+    if logging_config.backup_count < 0:
+        raise ConfigError("logging.backup_count must be non-negative.")
+    if logging_config.cycle_summary_interval_seconds < 0:
+        raise ConfigError("logging.cycle_summary_interval_seconds must be non-negative.")
     if not strategies:
         raise ConfigError("At least one [[strategies]] entry is required.")
     for strategy in strategies:
@@ -231,8 +265,6 @@ def _validate_config(
             raise ConfigError(f"Unsupported strategy type: {strategy.type}")
         if strategy.threshold < 0:
             raise ConfigError(f"Strategy threshold must be non-negative: {strategy.type}")
-        if strategy.epsilon <= 0:
-            raise ConfigError(f"Strategy epsilon must be positive: {strategy.type}")
 
 
 def _tuple_of_str(value: Any) -> tuple[str, ...]:

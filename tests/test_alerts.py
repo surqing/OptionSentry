@@ -41,6 +41,15 @@ class AlertEngineTests(unittest.TestCase):
         self.assertEqual(engine.process([evaluation(False)], "t2"), [])
         self.assertEqual(len(engine.process([evaluation(True)], "t3")), 1)
 
+    def test_active_count_tracks_latest_known_states(self) -> None:
+        engine = AlertEngine()
+
+        self.assertEqual(engine.active_count(), 0)
+        engine.process([evaluation(True)], "t1")
+        self.assertEqual(engine.active_count(), 1)
+        engine.process([evaluation(False)], "t2")
+        self.assertEqual(engine.active_count(), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

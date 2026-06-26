@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
 from kuaiqi.alerts import AlertEngine
@@ -17,36 +18,102 @@ class AlertRunner:
     alert_engine: AlertEngine
     notifier: Notifier
     logger: logging.Logger
+    cycle_summary_interval_seconds: int = 60
 
     def run(self) -> int:
-        universe = self.data_source.discover_universe()
-        if not universe.options:
-            self.logger.warning("Universe has no futures options to evaluate.")
-            return 0
-
         cycle_count = 0
         alert_count = 0
+        summary_cycle_count = 0
+        summary_alert_count = 0
+        summary_evaluation_count = 0
+        summary_changed_count = 0
+        summary_compute_ms = 0.0
+        last_summary_at = 0.0
         try:
+            universe = self.data_source.discover_universe()
+            if not universe.options:
+                self.logger.warning("Universe has no futures options to evaluate.")
+                return 0
+
+            compiled_strategies = tuple(strategy.compile(universe) for strategy in self.strategies)
+            total_conditions = sum(strategy.condition_count for strategy in compiled_strategies)
+            self.logger.info(
+                "Compiled alert strategies: strategies=%s total_conditions=%s",
+                len(compiled_strategies),
+                total_conditions,
+            )
+
+            initialized = False
             for snapshot in self.data_source.stream(universe):
+                changed_symbols = None if not initialized else snapshot.changed_symbols
+                started_at = time.perf_counter()
                 evaluations = []
-                for strategy in self.strategies:
-                    evaluations.extend(strategy.evaluate(snapshot, snapshot.universe))
+                for strategy in compiled_strategies:
+                    evaluations.extend(strategy.evaluate(snapshot, changed_symbols))
+                compute_ms = (time.perf_counter() - started_at) * 1000
                 events = self.alert_engine.process(evaluations, snapshot.timestamp)
                 for event in events:
                     self._notify(event)
                     alert_count += 1
+                self._flush_notifications()
                 cycle_count += 1
-                active_count = sum(1 for evaluation in evaluations if evaluation.active)
-                self.logger.info(
-                    "cycle=%s timestamp=%s evaluations=%s active=%s alerts=%s changed=%s",
+                initialized = True
+
+                summary_cycle_count += 1
+                summary_alert_count += len(events)
+                summary_evaluation_count += len(evaluations)
+                summary_changed_count += len(snapshot.changed_symbols)
+                summary_compute_ms += compute_ms
+                self.logger.debug(
+                    (
+                        "cycle=%s timestamp=%s evaluations=%s total_conditions=%s "
+                        "active=%s alerts=%s changed=%s compute_ms=%.3f"
+                    ),
                     cycle_count,
                     snapshot.timestamp,
                     len(evaluations),
-                    active_count,
+                    total_conditions,
+                    self.alert_engine.active_count(),
                     len(events),
                     len(snapshot.changed_symbols),
+                    compute_ms,
                 )
+                now = time.monotonic()
+                should_log_summary = (
+                    self.cycle_summary_interval_seconds == 0
+                    or last_summary_at == 0.0
+                    or now - last_summary_at >= self.cycle_summary_interval_seconds
+                    or bool(events)
+                )
+                if should_log_summary:
+                    avg_evaluations = summary_evaluation_count / summary_cycle_count
+                    avg_changed = summary_changed_count / summary_cycle_count
+                    avg_compute_ms = summary_compute_ms / summary_cycle_count
+                    self.logger.info(
+                        (
+                            "cycle_summary total_cycles=%s interval_cycles=%s timestamp=%s "
+                            "total_conditions=%s active=%s total_alerts=%s interval_alerts=%s "
+                            "avg_evaluations=%.1f avg_changed=%.1f avg_compute_ms=%.3f"
+                        ),
+                        cycle_count,
+                        summary_cycle_count,
+                        snapshot.timestamp,
+                        total_conditions,
+                        self.alert_engine.active_count(),
+                        alert_count,
+                        summary_alert_count,
+                        avg_evaluations,
+                        avg_changed,
+                        avg_compute_ms,
+                    )
+                    summary_cycle_count = 0
+                    summary_alert_count = 0
+                    summary_evaluation_count = 0
+                    summary_changed_count = 0
+                    summary_compute_ms = 0.0
+                    last_summary_at = now
         finally:
+            self._flush_notifications(force=True)
             self.data_source.close()
         self.logger.info("Runner stopped: cycles=%s alerts=%s", cycle_count, alert_count)
         return alert_count
@@ -55,5 +122,23 @@ class AlertRunner:
         self.logger.warning("alert key=%s message=%s", event.evaluation.key, event.evaluation.message)
         try:
             self.notifier.notify(event)
-        except Exception:
-            self.logger.exception("notification failed key=%s; continuing", event.evaluation.key)
+        except Exception as exc:
+            self.logger.error(
+                "notification failed key=%s error=%s: %s; continuing",
+                event.evaluation.key,
+                type(exc).__name__,
+                exc,
+            )
+
+    def _flush_notifications(self, force: bool = False) -> None:
+        flush = getattr(self.notifier, "flush", None)
+        if flush is None:
+            return
+        try:
+            flush(force=force)
+        except Exception as exc:
+            self.logger.error(
+                "notification flush failed error=%s: %s; continuing",
+                type(exc).__name__,
+                exc,
+            )
