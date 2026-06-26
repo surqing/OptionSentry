@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import sys
 from pathlib import Path
 from typing import Any
@@ -780,7 +781,7 @@ def _append_evaluation_row(
     row = table.rowCount()
     table.insertRow(row)
     values = (
-        timestamp,
+        _format_table_timestamp(timestamp),
         evaluation.strategy_name,
         f"{evaluation.value:.8f}",
         f"{evaluation.threshold:.8f}",
@@ -799,6 +800,20 @@ def _append_evaluation_row(
 def _table_is_at_bottom(table: QTableWidget) -> bool:
     scrollbar = table.verticalScrollBar()
     return scrollbar.value() >= scrollbar.maximum()
+
+
+def _format_table_timestamp(timestamp: str) -> str:
+    value = str(timestamp).strip()
+    if not value:
+        return ""
+    with_tz = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        return datetime.fromisoformat(with_tz).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        pass
+    if len(value) >= 19 and value[10] in (" ", "T") and value[13] == ":" and value[16] == ":":
+        return value[:19].replace("T", " ")
+    return value
 
 
 def _split_csv(value: str) -> list[str]:
@@ -892,7 +907,18 @@ def _apply_style(app: QApplication) -> None:
         QTableWidget {
             background: #ffffff;
             alternate-background-color: #f6f8fa;
+            color: #24292f;
             gridline-color: #d8dee4;
+            selection-background-color: #eaeef2;
+            selection-color: #24292f;
+        }
+        QTableWidget::item:hover {
+            background: #eaeef2;
+            color: #24292f;
+        }
+        QTableWidget::item:selected {
+            background: #eaeef2;
+            color: #24292f;
         }
         QHeaderView::section {
             background: #eef2f5;

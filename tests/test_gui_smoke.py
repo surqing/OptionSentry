@@ -14,10 +14,18 @@ class GuiSmokeTests(unittest.TestCase):
         from PyQt6.QtCore import Qt
 
         from kuaiqi.config import parse_config
-        from kuaiqi.gui.app import LoginWindow, MainWindow, _double_spin, _spin
+        from kuaiqi.gui.app import (
+            LoginWindow,
+            MainWindow,
+            _apply_style,
+            _double_spin,
+            _format_table_timestamp,
+            _spin,
+        )
         from kuaiqi.gui.credentials import CredentialResolution
 
         app = QApplication.instance() or QApplication([])
+        _apply_style(app)
         window = LoginWindow()
         config = parse_config(
             {
@@ -52,9 +60,16 @@ class GuiSmokeTests(unittest.TestCase):
             [strategy.type for strategy in main_window.config_editor.build_config().selected_strategies],
             ["cp_combo"],
         )
+        self.assertIn("QTableWidget::item:hover", app.styleSheet())
+        self.assertEqual(
+            _format_table_timestamp("2026-06-26 23:41:05.000000"),
+            "2026-06-26 23:41:05",
+        )
+
         main_window.tabs.setCurrentIndex(2)
-        main_window._on_alert(_alert_event("t0"))
+        main_window._on_alert(_alert_event("2026-06-26 23:41:05.000000"))
         self.assertEqual(main_window.tabs.currentIndex(), 2)
+        self.assertEqual(main_window.alert_table.item(0, 0).text(), "2026-06-26 23:41:05")
 
         main_window.tabs.setCurrentIndex(1)
         for index in range(80):
