@@ -392,8 +392,8 @@ class MainWindow(QMainWindow):
         self._populate_active_table(cycle.timestamp, cycle.evaluations)
 
     def _on_alert(self, event: AlertEvent) -> None:
-        _append_event_row(self.alert_table, event)
-        self.tabs.setCurrentIndex(1)
+        follow_latest = _table_is_at_bottom(self.alert_table)
+        _append_event_row(self.alert_table, event, scroll_to_bottom=follow_latest)
 
     def _populate_active_table(
         self,
@@ -763,11 +763,20 @@ def _table_box(title: str, table: QTableWidget) -> QGroupBox:
     return box
 
 
-def _append_event_row(table: QTableWidget, event: AlertEvent) -> None:
-    _append_evaluation_row(table, event.timestamp, event.evaluation)
+def _append_event_row(
+    table: QTableWidget,
+    event: AlertEvent,
+    scroll_to_bottom: bool = True,
+) -> None:
+    _append_evaluation_row(table, event.timestamp, event.evaluation, scroll_to_bottom)
 
 
-def _append_evaluation_row(table: QTableWidget, timestamp: str, evaluation: ConditionEvaluation) -> None:
+def _append_evaluation_row(
+    table: QTableWidget,
+    timestamp: str,
+    evaluation: ConditionEvaluation,
+    scroll_to_bottom: bool = True,
+) -> None:
     row = table.rowCount()
     table.insertRow(row)
     values = (
@@ -783,7 +792,13 @@ def _append_evaluation_row(table: QTableWidget, timestamp: str, evaluation: Cond
         if column in (2, 3):
             item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         table.setItem(row, column, item)
-    table.scrollToBottom()
+    if scroll_to_bottom:
+        table.scrollToBottom()
+
+
+def _table_is_at_bottom(table: QTableWidget) -> bool:
+    scrollbar = table.verticalScrollBar()
+    return scrollbar.value() >= scrollbar.maximum()
 
 
 def _split_csv(value: str) -> list[str]:

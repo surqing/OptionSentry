@@ -4,6 +4,8 @@ import os
 import unittest
 from pathlib import Path
 
+from kuaiqi.models import AlertEvent, ConditionEvaluation
+
 
 class GuiSmokeTests(unittest.TestCase):
     def test_pyqt_login_window_constructs_offscreen(self) -> None:
@@ -30,6 +32,8 @@ class GuiSmokeTests(unittest.TestCase):
             config,
             CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
         )
+        main_window.show()
+        app.processEvents()
 
         self.assertIsNotNone(app)
         self.assertEqual(window.windowTitle(), "KuaiQi 登录")
@@ -48,6 +52,25 @@ class GuiSmokeTests(unittest.TestCase):
             [strategy.type for strategy in main_window.config_editor.build_config().selected_strategies],
             ["cp_combo"],
         )
+        main_window.tabs.setCurrentIndex(2)
+        main_window._on_alert(_alert_event("t0"))
+        self.assertEqual(main_window.tabs.currentIndex(), 2)
+
+        main_window.tabs.setCurrentIndex(1)
+        for index in range(80):
+            main_window._on_alert(_alert_event(f"t{index + 1}"))
+        app.processEvents()
+        scrollbar = main_window.alert_table.verticalScrollBar()
+        self.assertGreater(scrollbar.maximum(), 0)
+        scrollbar.setValue(0)
+        app.processEvents()
+        history_position = scrollbar.value()
+        main_window.tabs.setCurrentIndex(3)
+        main_window._on_alert(_alert_event("later"))
+        app.processEvents()
+        self.assertEqual(main_window.tabs.currentIndex(), 3)
+        self.assertEqual(scrollbar.value(), history_position)
+
         main_window._set_running(True)
         self.assertTrue(main_window.config_editor.isEnabled())
         self.assertTrue(main_window.save_action.isEnabled())
@@ -68,6 +91,23 @@ class GuiSmokeTests(unittest.TestCase):
         double_spin.wheelEvent(event)
         self.assertEqual(double_spin.value(), 5.5)
         self.assertTrue(event.ignored)
+        main_window.close()
+        window.close()
+
+
+def _alert_event(timestamp: str) -> AlertEvent:
+    return AlertEvent(
+        timestamp=timestamp,
+        evaluation=ConditionEvaluation(
+            key=f"key:{timestamp}",
+            strategy_name="cp_combo",
+            active=True,
+            value=1.0,
+            threshold=0.1,
+            symbols=("SHFE.au2608C600", "SHFE.au2608P600", "SHFE.au2608"),
+            message=f"message {timestamp}",
+        ),
+    )
 
 
 class _FakeWheelEvent:
