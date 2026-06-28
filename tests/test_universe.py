@@ -134,7 +134,8 @@ class UniverseTests(unittest.TestCase):
         source.close()
 
     def test_live_universe_filters_liquidity_with_quote_probe(self) -> None:
-        api = _FakeDiscoveryApi(
+        discovery_api = _FakeDiscoveryApi(_liquidity_rows(include_metrics=False))
+        probe_api = _FakeDiscoveryApi(
             _liquidity_rows(include_metrics=False),
             events=(
                 _FakeQuoteEvent(
@@ -148,7 +149,12 @@ class UniverseTests(unittest.TestCase):
                 ),
             ),
         )
-        source = _FakeDiscoveryDataSource(api, min_volume=1, min_open_interest=1)
+        source = _FakeDiscoveryDataSource(
+            discovery_api,
+            min_volume=1,
+            min_open_interest=1,
+            probe_apis=(probe_api,),
+        )
 
         universe = source.discover_universe()
 
@@ -156,12 +162,56 @@ class UniverseTests(unittest.TestCase):
             {option.symbol for option in universe.options},
             {"SHFE.au2608C600", "SHFE.au2608P620"},
         )
+        self.assertEqual(discovery_api.quote_list_calls, ())
         self.assertEqual(
-            api.quote_list_calls,
+            probe_api.quote_list_calls,
             (("SHFE.au2608", "SHFE.au2608C600", "SHFE.au2608C620", "SHFE.au2608P600", "SHFE.au2608P620"),),
         )
-        self.assertTrue(api.closed)
+        self.assertTrue(discovery_api.closed)
+        self.assertTrue(probe_api.closed)
         self.assertIsNone(getattr(source, "_live_api", None))
+
+    def test_liquidity_probe_uses_isolated_apis_per_batch(self) -> None:
+        discovery_api = _FakeDiscoveryApi(_liquidity_rows(include_metrics=False))
+        probe_apis = tuple(
+            _FakeDiscoveryApi(
+                _liquidity_rows(include_metrics=False),
+                events=(
+                    _FakeQuoteEvent(
+                        {
+                            symbol: {"datetime": "t1", "volume": 10, "open_interest": 10}
+                            for symbol in batch
+                        }
+                    ),
+                ),
+            )
+            for batch in (
+                ("SHFE.au2608", "SHFE.au2608C600"),
+                ("SHFE.au2608C620", "SHFE.au2608P600"),
+                ("SHFE.au2608P620",),
+            )
+        )
+        source = _FakeDiscoveryDataSource(
+            discovery_api,
+            min_volume=1,
+            min_open_interest=1,
+            probe_apis=probe_apis,
+            quote_subscription_batch_size=2,
+        )
+
+        universe = source.discover_universe()
+
+        self.assertEqual(len(universe.options), 4)
+        self.assertEqual(discovery_api.quote_list_calls, ())
+        self.assertEqual(
+            [api.quote_list_calls for api in probe_apis],
+            [
+                (("SHFE.au2608", "SHFE.au2608C600"),),
+                (("SHFE.au2608C620", "SHFE.au2608P600"),),
+                (("SHFE.au2608P620",),),
+            ],
+        )
+        self.assertTrue(all(api.closed for api in probe_apis))
 
 
 class _FakeSymbolInfoApi:
@@ -183,8 +233,16 @@ class _FakeSymbolInfoFrame:
 
 
 class _FakeDiscoveryDataSource(TqSdkDataSource):
-    def __init__(self, api: "_FakeDiscoveryApi", min_volume: float, min_open_interest: float) -> None:
+    def __init__(
+        self,
+        api: "_FakeDiscoveryApi",
+        min_volume: float,
+        min_open_interest: float,
+        probe_apis: tuple["_FakeDiscoveryApi", ...] = (),
+        quote_subscription_batch_size: int = 10,
+    ) -> None:
         self.api = api
+        self.probe_apis = list(probe_apis)
         self.config = SimpleNamespace(
             runtime=SimpleNamespace(mode="live"),
             universe=SimpleNamespace(
@@ -197,14 +255,18 @@ class _FakeDiscoveryDataSource(TqSdkDataSource):
             ),
             tqsdk=SimpleNamespace(
                 symbol_info_batch_size=10,
-                quote_subscription_batch_size=10,
+                quote_subscription_batch_size=quote_subscription_batch_size,
             ),
         )
         self.logger = logging.getLogger("tests.universe.discovery")
         self.logger.handlers = [logging.NullHandler()]
         self.logger.propagate = False
+        self.create_api_calls = 0
 
     def _create_api(self) -> "_FakeDiscoveryApi":
+        self.create_api_calls += 1
+        if self.create_api_calls > 1 and self.probe_apis:
+            return self.probe_apis.pop(0)
         return self.api
 
 

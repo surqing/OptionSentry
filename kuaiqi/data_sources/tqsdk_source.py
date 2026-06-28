@@ -189,7 +189,12 @@ class TqSdkDataSource:
         ]
         used_quote_scan = False
         if missing_metric_symbols:
-            metrics.update(self._query_liquidity_metrics(api, sorted(metas)))
+            self.logger.info(
+                "Probing liquidity metrics for %s/%s symbols with missing metadata.",
+                len(missing_metric_symbols),
+                len(metas),
+            )
+            metrics.update(self._query_liquidity_metrics(sorted(missing_metric_symbols)))
             used_quote_scan = True
 
         kept_futures = {
@@ -215,51 +220,47 @@ class TqSdkDataSource:
         )
         return kept_futures, kept_options, used_quote_scan
 
-    def _query_liquidity_metrics(self, api: Any, symbols: list[str]) -> dict[str, tuple[float | None, float | None]]:
+    def _query_liquidity_metrics(self, symbols: list[str]) -> dict[str, tuple[float | None, float | None]]:
         if not symbols:
             return {}
-        quotes: dict[str, Any] = {}
+        metrics: dict[str, tuple[float | None, float | None]] = {}
+        missing_symbols: list[str] = []
         batch_size = self.config.tqsdk.quote_subscription_batch_size
         batches = list(_batches(symbols, batch_size))
         for batch_index, batch in enumerate(batches, start=1):
+            if self._should_stop():
+                break
             self.logger.info(
-                "Probing liquidity quote batch %s/%s with %s symbols.",
+                "Probing liquidity quote batch %s/%s with %s symbols using an isolated TqApi.",
                 batch_index,
                 len(batches),
                 len(batch),
             )
-            quotes.update(dict(zip(batch, api.get_quote_list(batch), strict=True)))
-            api.wait_update(deadline=time.time() + 5)
+            batch_api = self._create_api()
+            try:
+                quotes = dict(zip(batch, batch_api.get_quote_list(batch), strict=True))
+                missing_symbols.extend(self._wait_liquidity_quote_batch(batch_api, quotes))
+                metrics.update(_quote_liquidity_metrics(quotes))
+            finally:
+                batch_api.close()
 
-        deadline = time.time() + LIQUIDITY_FILTER_TIMEOUT_SECONDS
-        while True:
-            ready_count = sum(1 for quote in quotes.values() if _quote_has_snapshot(quote))
-            if ready_count == len(quotes) or time.time() >= deadline:
-                break
-            api.wait_update(deadline=min(deadline, time.time() + 2))
-
-        ready_count = sum(1 for quote in quotes.values() if _quote_has_snapshot(quote))
-        if ready_count != len(quotes):
-            missing = [
-                symbol
-                for symbol, quote in quotes.items()
-                if not _quote_has_snapshot(quote)
-            ]
+        if missing_symbols:
             self.logger.warning(
                 "Liquidity probe received snapshots for %s/%s symbols before timeout; "
                 "missing symbols may be treated as zero. First 20 missing: %s",
-                ready_count,
-                len(quotes),
-                missing[:20],
+                len(metrics) - len(missing_symbols),
+                len(metrics),
+                missing_symbols[:20],
             )
+        return metrics
 
-        return {
-            symbol: (
-                _optional_float(getattr(quote, "volume", None)),
-                _optional_float(getattr(quote, "open_interest", None)),
-            )
-            for symbol, quote in quotes.items()
-        }
+    def _wait_liquidity_quote_batch(self, api: Any, quotes: dict[str, Any]) -> list[str]:
+        deadline = time.time() + LIQUIDITY_FILTER_TIMEOUT_SECONDS
+        while True:
+            missing = _missing_liquidity_snapshot_symbols(quotes)
+            if not missing or time.time() >= deadline or self._should_stop():
+                return missing
+            api.wait_update(deadline=min(deadline, time.time() + 2))
 
     def _stream_live(self, universe: Universe) -> Iterator[MarketSnapshot]:
         symbols = sorted(universe.price_symbols())
@@ -664,6 +665,24 @@ def _metric_at_least(value: float | None, threshold: float) -> bool:
 
 def _quote_has_snapshot(quote: Any) -> bool:
     return bool(getattr(quote, "datetime", ""))
+
+
+def _missing_liquidity_snapshot_symbols(quotes: dict[str, Any]) -> list[str]:
+    return [
+        symbol
+        for symbol, quote in quotes.items()
+        if not _quote_has_snapshot(quote)
+    ]
+
+
+def _quote_liquidity_metrics(quotes: dict[str, Any]) -> dict[str, tuple[float | None, float | None]]:
+    return {
+        symbol: (
+            _optional_float(getattr(quote, "volume", None)),
+            _optional_float(getattr(quote, "open_interest", None)),
+        )
+        for symbol, quote in quotes.items()
+    }
 
 
 def _format_threshold(value: float) -> str:
