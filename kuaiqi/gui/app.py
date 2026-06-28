@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -41,6 +42,14 @@ from kuaiqi.gui.credentials import CredentialResolution, load_and_validate_login
 from kuaiqi.gui.runner_adapter import GuiRunSignals, build_gui_runner
 from kuaiqi.models import AlertEvent, ConditionEvaluation, Universe
 from kuaiqi.runner import RunnerCycle
+
+
+APP_NAME = "期权预警系统"
+APP_ICON_PATH = Path(__file__).with_name("assets") / "app_icon.svg"
+
+
+def app_icon() -> QIcon:
+    return QIcon(str(APP_ICON_PATH))
 
 
 class LoginWorker(QObject):
@@ -117,7 +126,8 @@ class MonitorWorker(QObject):
 class LoginWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("KuaiQi 登录")
+        self.setWindowTitle(APP_NAME)
+        self.setWindowIcon(app_icon())
         self.setMinimumWidth(480)
         self._thread: QThread | None = None
         self._worker: LoginWorker | None = None
@@ -127,7 +137,7 @@ class LoginWindow(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
-        title = QLabel("KuaiQi")
+        title = QLabel(APP_NAME)
         title.setObjectName("windowTitle")
         subtitle = QLabel("TqSdk 登录")
         subtitle.setObjectName("muted")
@@ -222,7 +232,8 @@ class MainWindow(QMainWindow):
         self._monitor_thread: QThread | None = None
         self._monitor_worker: MonitorWorker | None = None
         self._running = False
-        self.setWindowTitle("KuaiQi")
+        self.setWindowTitle(APP_NAME)
+        self.setWindowIcon(app_icon())
         self.resize(1180, 760)
         self._build_ui()
         self._load_config_into_editor(config)
@@ -233,7 +244,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(root)
         layout.setContentsMargins(16, 16, 16, 16)
         top = QHBoxLayout()
-        title = QLabel("KuaiQi 期权预警")
+        title = QLabel(APP_NAME)
         title.setObjectName("windowTitle")
         top.addWidget(title)
         top.addStretch(1)
@@ -991,6 +1002,8 @@ def _apply_style(app: QApplication) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     app = QApplication(sys.argv if argv is None else argv)
+    app.setApplicationName(APP_NAME)
+    app.setWindowIcon(app_icon())
     _apply_style(app)
     window = LoginWindow()
     window.show()

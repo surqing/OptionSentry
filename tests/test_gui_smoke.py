@@ -15,6 +15,8 @@ class GuiSmokeTests(unittest.TestCase):
 
         from kuaiqi.config import parse_config
         from kuaiqi.gui.app import (
+            APP_ICON_PATH,
+            APP_NAME,
             LoginWindow,
             MainWindow,
             _apply_style,
@@ -22,6 +24,7 @@ class GuiSmokeTests(unittest.TestCase):
             _format_status_timestamp,
             _format_table_timestamp,
             _spin,
+            app_icon,
         )
         from kuaiqi.gui.credentials import CredentialResolution
         from kuaiqi.runner import RunnerCycle
@@ -46,7 +49,13 @@ class GuiSmokeTests(unittest.TestCase):
         app.processEvents()
 
         self.assertIsNotNone(app)
-        self.assertEqual(window.windowTitle(), "KuaiQi 登录")
+        self.assertTrue(APP_ICON_PATH.exists())
+        self.assertFalse(app_icon().isNull())
+        self.assertFalse(app_icon().pixmap(32, 32).isNull())
+        self.assertEqual(window.windowTitle(), APP_NAME)
+        self.assertEqual(main_window.windowTitle(), APP_NAME)
+        self.assertFalse(window.windowIcon().isNull())
+        self.assertFalse(main_window.windowIcon().isNull())
         self.assertEqual(main_window.config_editor.build_config().runtime.mode, "live")
         self.assertEqual(main_window.findChildren(QToolBar), [])
         self.assertIs(main_window.save_action, main_window.config_editor.save_button)
