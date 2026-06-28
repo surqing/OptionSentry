@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
@@ -46,6 +47,7 @@ from kuaiqi.runner import RunnerCycle
 
 APP_NAME = "期权预警系统"
 APP_ICON_PATH = Path(__file__).with_name("assets") / "app_icon.svg"
+ALL_STRATEGIES_LABEL = "全部策略"
 
 
 def app_icon() -> QIcon:
@@ -302,21 +304,17 @@ class MainWindow(QMainWindow):
             grid.addWidget(value, row, column + 1)
         layout.addWidget(status_box)
 
-        self.active_table = QTableWidget(0, 6)
-        self.active_table.setHorizontalHeaderLabels(("时间", "策略", "值", "阈值", "合约", "消息"))
-        _configure_resizable_columns(self.active_table, (165, 110, 100, 100, 280, 420))
-        self.active_table.setAlternatingRowColors(True)
-        layout.addWidget(_table_box("当前触发", self.active_table), 1)
+        self.active_view = StrategyEvaluationTable("当前触发")
+        self.active_table = self.active_view.table
+        layout.addWidget(self.active_view, 1)
         return tab
 
     def _alerts_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        self.alert_table = QTableWidget(0, 6)
-        self.alert_table.setHorizontalHeaderLabels(("时间", "策略", "值", "阈值", "合约", "消息"))
-        _configure_resizable_columns(self.alert_table, (165, 110, 100, 100, 280, 420))
-        self.alert_table.setAlternatingRowColors(True)
-        layout.addWidget(self.alert_table)
+        self.alert_view = StrategyEvaluationTable("预警记录")
+        self.alert_table = self.alert_view.table
+        layout.addWidget(self.alert_view)
         return tab
 
     def _logs_tab(self) -> QWidget:
@@ -334,6 +332,7 @@ class MainWindow(QMainWindow):
         self._set_status("config_path", str(self.config_path))
         self._set_status("credential_source", self.credentials.source)
         self._set_status("strategies", str(len(config.selected_strategies)))
+        self._set_strategy_filters(config)
 
     def _start_monitor(self) -> None:
         if self._running:
@@ -343,8 +342,9 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.warning(self, "配置错误", str(exc))
             return
-        self.alert_table.setRowCount(0)
-        self.active_table.setRowCount(0)
+        self._set_strategy_filters(self.config)
+        self.alert_view.clear_records()
+        self.active_view.clear_records()
         self._append_log("Starting monitor")
         self._set_running(True)
         self._monitor_thread = QThread(self)
@@ -398,7 +398,7 @@ class MainWindow(QMainWindow):
 
     def _on_alert(self, event: AlertEvent) -> None:
         follow_latest = _table_is_at_bottom(self.alert_table)
-        _append_event_row(self.alert_table, event, scroll_to_bottom=follow_latest)
+        self.alert_view.append_record(event.timestamp, event.evaluation, scroll_to_bottom=follow_latest)
 
     def _populate_active_table(
         self,
@@ -406,9 +406,12 @@ class MainWindow(QMainWindow):
         evaluations: tuple[ConditionEvaluation, ...],
     ) -> None:
         active = [evaluation for evaluation in evaluations if evaluation.active]
-        self.active_table.setRowCount(0)
-        for evaluation in active:
-            _append_evaluation_row(self.active_table, timestamp, evaluation)
+        self.active_view.set_records(_EvaluationRecord(timestamp, evaluation) for evaluation in active)
+
+    def _set_strategy_filters(self, config: AppConfig) -> None:
+        strategy_names = [strategy.name or strategy.type for strategy in config.selected_strategies]
+        self.active_view.set_strategy_names(strategy_names)
+        self.alert_view.set_strategy_names(strategy_names)
 
     def _save_config(self) -> None:
         try:
@@ -418,6 +421,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "保存失败", str(exc))
             return
         self.config = config
+        self._set_strategy_filters(config)
         suffix = "；当前监控继续使用启动时的配置" if self._running else ""
         self._append_log(f"Saved config: {self.config_path}{suffix}")
 
@@ -453,6 +457,158 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         super().closeEvent(event)
+
+
+@dataclass(frozen=True)
+class _EvaluationRecord:
+    timestamp: str
+    evaluation: ConditionEvaluation
+
+
+class StrategyEvaluationTable(QGroupBox):
+    def __init__(self, title: str) -> None:
+        super().__init__(title)
+        self._configured_strategy_names: tuple[str, ...] = ()
+        self._strategy_names: tuple[str, ...] = ()
+        self._selected_strategy: str | None = None
+        self._records: list[_EvaluationRecord] = []
+        self._buttons: dict[str | None, QPushButton] = {}
+        self._include_strategy_column: bool | None = None
+
+        layout = QVBoxLayout(self)
+        filter_row = QHBoxLayout()
+        self._filter_layout = QHBoxLayout()
+        filter_row.addLayout(self._filter_layout)
+        filter_row.addStretch(1)
+        layout.addLayout(filter_row)
+
+        self.table = QTableWidget(0, 0)
+        self.table.setAlternatingRowColors(True)
+        layout.addWidget(self.table)
+
+        self._rebuild_filter_buttons()
+        self._render()
+
+    def set_strategy_names(self, strategy_names: Iterable[str]) -> None:
+        self._configured_strategy_names = _unique_names(strategy_names)
+        self._sync_strategy_buttons()
+        self._render()
+
+    def filter_labels(self) -> tuple[str, ...]:
+        return tuple(button.text() for button in self._buttons.values())
+
+    def set_strategy_filter(self, strategy_name: str | None) -> None:
+        if strategy_name is not None and strategy_name not in self._strategy_names:
+            return
+        self._selected_strategy = strategy_name
+        for name, button in self._buttons.items():
+            button.setChecked(name == strategy_name)
+        self._render()
+
+    def clear_records(self) -> None:
+        self._records = []
+        self._sync_strategy_buttons()
+        self._render()
+
+    def set_records(self, records: Iterable[_EvaluationRecord]) -> None:
+        self._records = list(records)
+        self._sync_strategy_buttons()
+        self._render()
+
+    def append_record(
+        self,
+        timestamp: str,
+        evaluation: ConditionEvaluation,
+        scroll_to_bottom: bool = True,
+    ) -> None:
+        self._records.append(_EvaluationRecord(timestamp, evaluation))
+        self._sync_strategy_buttons()
+        self._render(scroll_to_bottom=scroll_to_bottom, preserve_scroll=not scroll_to_bottom)
+
+    def _sync_strategy_buttons(self) -> None:
+        record_strategy_names = (record.evaluation.strategy_name for record in self._records)
+        strategy_names = _unique_names((*self._configured_strategy_names, *record_strategy_names))
+        if self._selected_strategy is not None and self._selected_strategy not in strategy_names:
+            self._selected_strategy = None
+        if strategy_names == self._strategy_names:
+            return
+        self._strategy_names = strategy_names
+        self._rebuild_filter_buttons()
+
+    def _rebuild_filter_buttons(self) -> None:
+        while self._filter_layout.count():
+            item = self._filter_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._buttons = {}
+        self._add_filter_button(None, ALL_STRATEGIES_LABEL)
+        for strategy_name in self._strategy_names:
+            self._add_filter_button(strategy_name, strategy_name)
+
+    def _add_filter_button(self, strategy_name: str | None, label: str) -> None:
+        button = QPushButton(label)
+        button.setCheckable(True)
+        button.setChecked(strategy_name == self._selected_strategy)
+        button.clicked.connect(lambda _checked=False, name=strategy_name: self.set_strategy_filter(name))
+        self._filter_layout.addWidget(button)
+        self._buttons[strategy_name] = button
+
+    def _render(self, scroll_to_bottom: bool = False, preserve_scroll: bool = False) -> None:
+        include_strategy = self._selected_strategy is None
+        self._ensure_table_shape(include_strategy)
+        vertical_scroll = self.table.verticalScrollBar()
+        horizontal_scroll = self.table.horizontalScrollBar()
+        previous_vertical = vertical_scroll.value() if preserve_scroll else 0
+        previous_horizontal = horizontal_scroll.value() if preserve_scroll else 0
+        records = [
+            record
+            for record in self._records
+            if include_strategy or record.evaluation.strategy_name == self._selected_strategy
+        ]
+        self.table.setRowCount(0)
+        for record in records:
+            self._append_row(record, include_strategy)
+        if scroll_to_bottom:
+            self.table.scrollToBottom()
+        elif preserve_scroll:
+            vertical_scroll.setValue(min(previous_vertical, vertical_scroll.maximum()))
+            horizontal_scroll.setValue(min(previous_horizontal, horizontal_scroll.maximum()))
+
+    def _ensure_table_shape(self, include_strategy: bool) -> None:
+        if self._include_strategy_column == include_strategy:
+            return
+        self._include_strategy_column = include_strategy
+        if include_strategy:
+            headers = ("时间", "策略名", "值", "阈值", "合约", "消息")
+            widths = (165, 130, 100, 100, 280, 420)
+        else:
+            headers = ("时间", "值", "阈值", "合约", "消息")
+            widths = (165, 100, 100, 280, 420)
+        self.table.setColumnCount(len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
+        _configure_resizable_columns(self.table, widths)
+
+    def _append_row(self, record: _EvaluationRecord, include_strategy: bool) -> None:
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        evaluation = record.evaluation
+        values = [
+            _format_table_timestamp(record.timestamp),
+            f"{evaluation.value:.8f}",
+            f"{evaluation.threshold:.8f}",
+            ", ".join(evaluation.symbols),
+            evaluation.message,
+        ]
+        numeric_columns = (1, 2)
+        if include_strategy:
+            values.insert(1, evaluation.strategy_name)
+            numeric_columns = (2, 3)
+        for column, value in enumerate(values):
+            item = QTableWidgetItem(value)
+            if column in numeric_columns:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, column, item)
 
 
 class ConfigEditor(QWidget):
@@ -765,11 +921,16 @@ class ConfigEditor(QWidget):
             self.strategies.removeRow(row)
 
 
-def _table_box(title: str, table: QTableWidget) -> QGroupBox:
-    box = QGroupBox(title)
-    layout = QVBoxLayout(box)
-    layout.addWidget(table)
-    return box
+def _unique_names(names: Iterable[str]) -> tuple[str, ...]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        clean_name = str(name).strip()
+        if not clean_name or clean_name in seen:
+            continue
+        seen.add(clean_name)
+        unique.append(clean_name)
+    return tuple(unique)
 
 
 def _configure_resizable_columns(table: QTableWidget, widths: tuple[int, ...]) -> None:
@@ -778,39 +939,6 @@ def _configure_resizable_columns(table: QTableWidget, widths: tuple[int, ...]) -
     header.setMinimumSectionSize(50)
     for column, width in enumerate(widths):
         table.setColumnWidth(column, width)
-
-
-def _append_event_row(
-    table: QTableWidget,
-    event: AlertEvent,
-    scroll_to_bottom: bool = True,
-) -> None:
-    _append_evaluation_row(table, event.timestamp, event.evaluation, scroll_to_bottom)
-
-
-def _append_evaluation_row(
-    table: QTableWidget,
-    timestamp: str,
-    evaluation: ConditionEvaluation,
-    scroll_to_bottom: bool = True,
-) -> None:
-    row = table.rowCount()
-    table.insertRow(row)
-    values = (
-        _format_table_timestamp(timestamp),
-        evaluation.strategy_name,
-        f"{evaluation.value:.8f}",
-        f"{evaluation.threshold:.8f}",
-        ", ".join(evaluation.symbols),
-        evaluation.message,
-    )
-    for column, value in enumerate(values):
-        item = QTableWidgetItem(value)
-        if column in (2, 3):
-            item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        table.setItem(row, column, item)
-    if scroll_to_bottom:
-        table.scrollToBottom()
 
 
 def _table_is_at_bottom(table: QTableWidget) -> bool:

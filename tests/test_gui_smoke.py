@@ -109,18 +109,35 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertGreater(combo.view().font().pointSize(), 0)
             self.assertEqual(combo.view().font().pixelSize(), -1)
 
+        self.assertEqual(main_window.alert_view.filter_labels(), ("全部策略", "cp_combo"))
         main_window.tabs.setCurrentIndex(2)
         main_window._on_alert(_alert_event("2026-06-26 23:41:05.000000"))
         self.assertEqual(main_window.tabs.currentIndex(), 2)
         self.assertEqual(main_window.alert_table.item(0, 0).text(), "2026-06-26 23:41:05")
+        self.assertIn("策略名", _table_headers(main_window.alert_table))
+        self.assertEqual(main_window.alert_table.item(0, 1).text(), "cp_combo")
+
+        main_window._on_alert(_alert_event("2026-06-26 23:42:05", strategy_name="abs_spread"))
+        self.assertEqual(main_window.alert_view.filter_labels(), ("全部策略", "cp_combo", "abs_spread"))
+        self.assertEqual(main_window.alert_table.rowCount(), 2)
+        main_window.alert_view.set_strategy_filter("cp_combo")
+        self.assertNotIn("策略名", _table_headers(main_window.alert_table))
+        self.assertEqual(main_window.alert_table.rowCount(), 1)
+        self.assertEqual(main_window.alert_table.item(0, 1).text(), "1.00000000")
+        main_window.alert_view.set_strategy_filter(None)
+        self.assertIn("策略名", _table_headers(main_window.alert_table))
+        self.assertEqual(main_window.alert_table.rowCount(), 2)
 
         main_window._on_cycle(
             RunnerCycle(
                 cycle_count=1,
                 timestamp="2026-06-26 23:41:05.987654",
-                evaluations=(),
+                evaluations=(
+                    _evaluation(strategy_name="cp_combo"),
+                    _evaluation(strategy_name="abs_spread"),
+                ),
                 total_conditions=0,
-                active_count=0,
+                active_count=2,
                 alerts=(),
                 total_alerts=0,
                 changed_count=0,
@@ -128,14 +145,19 @@ class GuiSmokeTests(unittest.TestCase):
             )
         )
         self.assertEqual(main_window.status_labels["timestamp"].text(), "2026-06-26 23:41:05.9")
+        self.assertIn("策略名", _table_headers(main_window.active_table))
+        self.assertEqual(main_window.active_table.rowCount(), 2)
+        main_window.active_view.set_strategy_filter("abs_spread")
+        self.assertNotIn("策略名", _table_headers(main_window.active_table))
+        self.assertEqual(main_window.active_table.rowCount(), 1)
 
         main_window.tabs.setCurrentIndex(1)
         for index in range(80):
             main_window._on_alert(_alert_event(f"t{index + 1}"))
         app.processEvents()
         scrollbar = main_window.alert_table.verticalScrollBar()
-        self.assertGreater(scrollbar.maximum(), 0)
-        scrollbar.setValue(0)
+        self.assertGreater(scrollbar.maximum(), 2)
+        scrollbar.setValue(max(1, scrollbar.maximum() // 2))
         app.processEvents()
         history_position = scrollbar.value()
         main_window.tabs.setCurrentIndex(3)
@@ -180,18 +202,29 @@ class GuiSmokeTests(unittest.TestCase):
         window.close()
 
 
-def _alert_event(timestamp: str) -> AlertEvent:
+def _alert_event(timestamp: str, strategy_name: str = "cp_combo") -> AlertEvent:
     return AlertEvent(
         timestamp=timestamp,
-        evaluation=ConditionEvaluation(
-            key=f"key:{timestamp}",
-            strategy_name="cp_combo",
-            active=True,
-            value=1.0,
-            threshold=0.1,
-            symbols=("SHFE.au2608C600", "SHFE.au2608P600", "SHFE.au2608"),
-            message=f"message {timestamp}",
-        ),
+        evaluation=_evaluation(strategy_name=strategy_name, suffix=timestamp),
+    )
+
+
+def _evaluation(strategy_name: str = "cp_combo", suffix: str = "eval") -> ConditionEvaluation:
+    return ConditionEvaluation(
+        key=f"key:{strategy_name}:{suffix}",
+        strategy_name=strategy_name,
+        active=True,
+        value=1.0,
+        threshold=0.1,
+        symbols=("SHFE.au2608C600", "SHFE.au2608P600", "SHFE.au2608"),
+        message=f"message {suffix}",
+    )
+
+
+def _table_headers(table) -> tuple[str, ...]:
+    return tuple(
+        table.horizontalHeaderItem(column).text()
+        for column in range(table.columnCount())
     )
 
 
