@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -252,20 +251,14 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self._monitor_tab(), "监控")
         self.tabs.addTab(self._alerts_tab(), "预警")
         self.config_editor = ConfigEditor()
+        self.config_editor.save_button.clicked.connect(self._save_config)
+        self.config_editor.reload_button.clicked.connect(self._reload_config)
         self.tabs.addTab(self.config_editor, "配置")
         self.tabs.addTab(self._logs_tab(), "日志")
         layout.addWidget(self.tabs, 1)
         self.setCentralWidget(root)
-
-        save_action = QAction("保存配置", self)
-        save_action.triggered.connect(self._save_config)
-        reload_action = QAction("重新加载", self)
-        reload_action.triggered.connect(self._reload_config)
-        toolbar = self.addToolBar("配置")
-        toolbar.addAction(save_action)
-        toolbar.addAction(reload_action)
-        self.save_action = save_action
-        self.reload_action = reload_action
+        self.save_action = self.config_editor.save_button
+        self.reload_action = self.config_editor.reload_button
 
     def _monitor_tab(self) -> QWidget:
         tab = QWidget()
@@ -455,6 +448,15 @@ class ConfigEditor(QWidget):
     def __init__(self) -> None:
         super().__init__()
         outer = QVBoxLayout(self)
+        actions = QHBoxLayout()
+        self.save_button = QPushButton("保存配置")
+        self.save_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton))
+        self.reload_button = QPushButton("重新加载")
+        self.reload_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
+        actions.addStretch(1)
+        actions.addWidget(self.save_button)
+        actions.addWidget(self.reload_button)
+        outer.addLayout(actions)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         content = QWidget()
