@@ -217,39 +217,34 @@ class LivePriceCacheTests(unittest.TestCase):
         self.assertEqual(set(quotes), {"A", "B", "C", "D", "E"})
         self.assertEqual(api.quote_list_calls, (("A", "B"), ("C", "D"), ("E",)))
 
-    def test_live_quote_subscription_caps_large_configured_batches(self) -> None:
+    def test_live_quote_subscription_allows_threshold_symbol_count(self) -> None:
         api = _FakeApi(events=())
         data_source = _FakeLiveDataSource(api, quote_subscription_batch_size=500)
-        symbols = [f"S{index}" for index in range(205)]
+        symbols = [f"S{index}" for index in range(1300)]
 
         quotes = data_source._subscribe_live_quotes(api, symbols)
 
         self.assertEqual(set(quotes), set(symbols))
-        self.assertEqual([len(call) for call in api.quote_list_calls], [100, 100, 5])
 
-    def test_live_quote_subscription_rejects_oversized_symbol_text(self) -> None:
+    def test_live_quote_subscription_rejects_count_above_threshold(self) -> None:
         api = _FakeApi(events=())
         data_source = _FakeLiveDataSource(api, quote_subscription_batch_size=500)
-        symbols = [f"SHFE.very_long_option_symbol_{index:05d}_{'x' * 80}" for index in range(1000)]
+        symbols = [f"S{index}" for index in range(1301)]
 
-        with self.assertRaisesRegex(ConfigError, "Live quote subscription is too large"):
+        with self.assertRaisesRegex(ConfigError, "预处理后需要订阅的合约数量过多"):
             data_source._subscribe_live_quotes(api, symbols)
 
         self.assertEqual(api.quote_list_calls, ())
 
-    def test_live_quote_subscription_summarizes_batch_timeout(self) -> None:
-        api = _FailingQuoteApi(events=(), error=TimeoutError("raw " + "x" * 5000))
+    def test_live_stream_rejects_preprocessed_universe_above_threshold(self) -> None:
+        api = _FakeApi(events=())
         data_source = _FakeLiveDataSource(api, quote_subscription_batch_size=500)
-        symbols = [f"S{index}" for index in range(150)]
 
-        with self.assertRaises(ConfigError) as raised:
-            data_source._subscribe_live_quotes(api, symbols)
+        with self.assertRaisesRegex(ConfigError, "预处理后需要订阅的合约数量过多"):
+            next(data_source._stream_live(_large_option_universe(650)))
 
-        message = str(raised.exception)
-        self.assertIn("Live quote subscription failed at batch 1/2", message)
-        self.assertIn("Batch has 100 symbols", message)
-        self.assertIn("first symbols: S0, S1", message)
-        self.assertLess(len(message), 500)
+        self.assertEqual(data_source.create_api_calls, 0)
+        self.assertEqual(api.quote_list_calls, ())
 
 
 def _full_scan_events(
@@ -393,16 +388,6 @@ class _FakeApi:
     def close(self) -> None:
         self.close_count += 1
         self.closed = True
-
-
-class _FailingQuoteApi(_FakeApi):
-    def __init__(self, events: tuple[_FakeEvent, ...], error: Exception) -> None:
-        super().__init__(events)
-        self.error = error
-
-    def get_quote_list(self, symbols: list[str]) -> list[_FakeQuote]:
-        self.quote_list_calls = (*self.quote_list_calls, tuple(symbols))
-        raise self.error
 
 
 class _FakeSymbolInfoFrame:

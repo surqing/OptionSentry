@@ -15,8 +15,7 @@ from kuaiqi.models import InstrumentMeta, MarketSnapshot, Universe
 
 FUTURE_EXCHANGES = {"CFFEX", "SHFE", "DCE", "CZCE", "INE", "GFEX"}
 LIQUIDITY_FILTER_TIMEOUT_SECONDS = 30
-TQSDK_SUBSCRIBE_SYMBOL_TEXT_LIMIT = 100_000
-TQSDK_LIVE_SUBSCRIBE_BATCH_SYMBOL_LIMIT = 100
+MAX_LIVE_SUBSCRIPTION_SYMBOLS = 1300
 
 
 @dataclass
@@ -333,7 +332,7 @@ class TqSdkDataSource:
         _validate_live_subscription_size(symbols)
         quotes: dict[str, Any] = {}
         batch_size = self.config.tqsdk.quote_subscription_batch_size
-        batches = list(_live_subscription_batches(symbols, batch_size))
+        batches = list(_batches(symbols, batch_size))
         for batch_index, batch in enumerate(batches, start=1):
             self.logger.info(
                 "Subscribing live quote batch %s/%s with %s symbols.",
@@ -341,22 +340,9 @@ class TqSdkDataSource:
                 len(batches),
                 len(batch),
             )
-            try:
-                quotes.update(dict(zip(batch, api.get_quote_list(batch), strict=True)))
-            except Exception as exc:
-                raise ConfigError(
-                    _format_live_subscription_error(exc, batch, batch_index, len(batches))
-                ) from exc
+            quotes.update(dict(zip(batch, api.get_quote_list(batch), strict=True)))
             if batch_index < len(batches):
-                try:
-                    api.wait_update(deadline=time.time() + 5)
-                except Exception as exc:
-                    raise ConfigError(
-                        "Live quote subscription failed while waiting after "
-                        f"batch {batch_index}/{len(batches)}: {type(exc).__name__}. "
-                        "Try narrowing universe.mode/underlyings/exchange_ids or reducing "
-                        "datasource.tqsdk.quote_subscription_batch_size."
-                    ) from exc
+                api.wait_update(deadline=time.time() + 5)
         return quotes
 
     def _stream_backtest_universe(self, universe: Universe) -> Iterator[MarketSnapshot]:
@@ -766,43 +752,17 @@ def _order_backtest_symbols(universe: Universe, symbols: list[str]) -> list[str]
 
 
 def _validate_live_subscription_size(symbols: list[str]) -> None:
-    symbol_text_length = len(",".join(symbols))
-    if symbol_text_length <= TQSDK_SUBSCRIBE_SYMBOL_TEXT_LIMIT:
+    if len(symbols) <= MAX_LIVE_SUBSCRIPTION_SYMBOLS:
         return
     raise ConfigError(
-        "Live quote subscription is too large after universe filtering: "
-        f"{len(symbols)} symbols, symbol text length={symbol_text_length}, "
-        f"limit={TQSDK_SUBSCRIBE_SYMBOL_TEXT_LIMIT}. "
-        "Narrow universe.mode/underlyings/exchange_ids or increase liquidity filters "
-        "before starting live monitoring."
+        "预处理后需要订阅的合约数量过多，已停止本次预警系统启动。\n\n"
+        f"当前需要订阅 {len(symbols)} 个合约，最大允许 {MAX_LIVE_SUBSCRIPTION_SYMBOLS} 个。\n\n"
+        "请通过以下方式降低订阅数：\n"
+        "- 将合约范围模式从 all 改为 underlyings，只填写需要监控的标的期货。\n"
+        "- 缩小 exchange_ids，只扫描必要交易所。\n"
+        "- 提高 min_volume 或 min_open_interest，过滤低流动性期权。\n"
+        "- 减少要监控的到期月份或标的范围。"
     )
-
-
-def _live_subscription_batches(symbols: list[str], configured_batch_size: int) -> Iterator[list[str]]:
-    batch_size = max(1, min(configured_batch_size, TQSDK_LIVE_SUBSCRIBE_BATCH_SYMBOL_LIMIT))
-    yield from _batches(symbols, batch_size)
-
-
-def _format_live_subscription_error(
-    exc: Exception,
-    batch: list[str],
-    batch_index: int,
-    batch_count: int,
-) -> str:
-    return (
-        f"Live quote subscription failed at batch {batch_index}/{batch_count}: "
-        f"{type(exc).__name__}. Batch has {len(batch)} symbols; "
-        f"first symbols: {_symbol_preview(batch)}. "
-        "Try narrowing universe.mode/underlyings/exchange_ids, increasing liquidity filters, "
-        "or reducing datasource.tqsdk.quote_subscription_batch_size."
-    )
-
-
-def _symbol_preview(symbols: list[str], limit: int = 12) -> str:
-    preview = ", ".join(symbols[:limit])
-    if len(symbols) > limit:
-        preview = f"{preview}, ..."
-    return preview
 
 
 def _batches(symbols: list[str], batch_size: int) -> Iterator[list[str]]:

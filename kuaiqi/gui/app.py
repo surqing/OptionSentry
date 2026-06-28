@@ -48,7 +48,6 @@ from kuaiqi.runner import RunnerCycle
 APP_NAME = "期权预警系统"
 APP_ICON_PATH = Path(__file__).with_name("assets") / "app_icon.svg"
 ALL_STRATEGIES_LABEL = "全部策略"
-DIALOG_MESSAGE_LIMIT = 1200
 
 
 def app_icon() -> QIcon:
@@ -379,7 +378,7 @@ class MainWindow(QMainWindow):
 
     def _on_monitor_failed(self, message: str) -> None:
         self._append_log(message)
-        QMessageBox.critical(self, "监控失败", _dialog_message(message))
+        QMessageBox.critical(self, "监控失败", message)
 
     def _on_universe(self, universe: Universe) -> None:
         self._set_status("options", str(len(universe.options)))
@@ -932,15 +931,6 @@ def _unique_names(names: Iterable[str]) -> tuple[str, ...]:
         seen.add(clean_name)
         unique.append(clean_name)
     return tuple(unique)
-
-
-def _dialog_message(message: str) -> str:
-    if len(message) <= DIALOG_MESSAGE_LIMIT:
-        return message
-    return (
-        f"{message[:DIALOG_MESSAGE_LIMIT]}\n\n"
-        "……消息过长，已截断；完整内容请查看日志面板或日志文件。"
-    )
 
 
 def _configure_resizable_columns(table: QTableWidget, widths: tuple[int, ...]) -> None:

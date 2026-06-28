@@ -20,7 +20,6 @@ class GuiSmokeTests(unittest.TestCase):
             LoginWindow,
             MainWindow,
             _apply_style,
-            _dialog_message,
             _double_spin,
             _format_status_timestamp,
             _format_table_timestamp,
@@ -90,7 +89,6 @@ class GuiSmokeTests(unittest.TestCase):
             _format_status_timestamp("2026-06-26 23:41:05"),
             "2026-06-26 23:41:05.0",
         )
-        self.assertIn("已截断", _dialog_message("x" * 2000))
         for table in (
             main_window.active_table,
             main_window.alert_table,
