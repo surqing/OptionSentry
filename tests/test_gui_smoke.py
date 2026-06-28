@@ -89,6 +89,16 @@ class GuiSmokeTests(unittest.TestCase):
                 table.horizontalHeader().sectionResizeMode(0),
                 QHeaderView.ResizeMode.Interactive,
             )
+        for combo in (
+            main_window.config_editor.runtime_mode,
+            main_window.config_editor.universe_mode,
+        ):
+            combo.ensurePolished()
+            combo.view().ensurePolished()
+            self.assertGreater(combo.font().pointSize(), 0)
+            self.assertEqual(combo.font().pixelSize(), -1)
+            self.assertGreater(combo.view().font().pointSize(), 0)
+            self.assertEqual(combo.view().font().pixelSize(), -1)
 
         main_window.tabs.setCurrentIndex(2)
         main_window._on_alert(_alert_event("2026-06-26 23:41:05.000000"))

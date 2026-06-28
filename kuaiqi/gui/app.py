@@ -875,6 +875,11 @@ class NoWheelComboBox(QComboBox):
     def wheelEvent(self, event: Any) -> None:
         event.ignore()
 
+    def showPopup(self) -> None:
+        _ensure_point_size_font(self)
+        _ensure_point_size_font(self.view())
+        super().showPopup()
+
 
 def _spin(minimum: int, maximum: int) -> QSpinBox:
     spin = NoWheelSpinBox()
@@ -889,11 +894,24 @@ def _double_spin() -> QDoubleSpinBox:
     return spin
 
 
+def _ensure_point_size_font(widget: QWidget) -> None:
+    font = widget.font()
+    if font.pointSize() > 0:
+        return
+    app = QApplication.instance()
+    app_font = app.font() if app is not None else QApplication.font()
+    point_size = app_font.pointSize()
+    if point_size <= 0:
+        point_size = 10
+    font.setPointSize(point_size)
+    widget.setFont(font)
+
+
 def _apply_style(app: QApplication) -> None:
     app.setStyleSheet(
         """
         QWidget {
-            font-size: 13px;
+            font-size: 10pt;
         }
         QMainWindow, QWidget {
             background: #f7f8fa;
@@ -955,7 +973,7 @@ def _apply_style(app: QApplication) -> None:
             font-weight: 600;
         }
         QLabel#windowTitle {
-            font-size: 22px;
+            font-size: 16pt;
             font-weight: 700;
         }
         QLabel#muted {
