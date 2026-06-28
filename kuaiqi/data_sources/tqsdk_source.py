@@ -15,7 +15,7 @@ from kuaiqi.models import InstrumentMeta, MarketSnapshot, Universe
 
 FUTURE_EXCHANGES = {"CFFEX", "SHFE", "DCE", "CZCE", "INE", "GFEX"}
 LIQUIDITY_FILTER_TIMEOUT_SECONDS = 30
-MAX_LIVE_SUBSCRIPTION_SYMBOLS = 1300
+MAX_LIVE_SUBSCRIPTION_SYMBOLS = 13000
 
 
 @dataclass

@@ -220,7 +220,7 @@ class LivePriceCacheTests(unittest.TestCase):
     def test_live_quote_subscription_allows_threshold_symbol_count(self) -> None:
         api = _FakeApi(events=())
         data_source = _FakeLiveDataSource(api, quote_subscription_batch_size=500)
-        symbols = [f"S{index}" for index in range(1300)]
+        symbols = [f"S{index}" for index in range(13000)]
 
         quotes = data_source._subscribe_live_quotes(api, symbols)
 
@@ -229,7 +229,7 @@ class LivePriceCacheTests(unittest.TestCase):
     def test_live_quote_subscription_rejects_count_above_threshold(self) -> None:
         api = _FakeApi(events=())
         data_source = _FakeLiveDataSource(api, quote_subscription_batch_size=500)
-        symbols = [f"S{index}" for index in range(1301)]
+        symbols = [f"S{index}" for index in range(13001)]
 
         with self.assertRaisesRegex(ConfigError, "预处理后需要订阅的合约数量过多"):
             data_source._subscribe_live_quotes(api, symbols)
@@ -241,7 +241,7 @@ class LivePriceCacheTests(unittest.TestCase):
         data_source = _FakeLiveDataSource(api, quote_subscription_batch_size=500)
 
         with self.assertRaisesRegex(ConfigError, "预处理后需要订阅的合约数量过多"):
-            next(data_source._stream_live(_large_option_universe(650)))
+            next(data_source._stream_live(_large_option_universe(6500)))
 
         self.assertEqual(data_source.create_api_calls, 0)
         self.assertEqual(api.quote_list_calls, ())
