@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from kuaiqi.alerts import AlertEngine
+from kuaiqi.config import ConfigError
 from kuaiqi.data_sources.tqsdk_source import TqSdkDataSource
 from kuaiqi.models import InstrumentMeta, MarketSnapshot, Universe
 from kuaiqi.strategies import AbsSpreadStrategy, CPComboStrategy, Strategy
@@ -215,6 +216,16 @@ class LivePriceCacheTests(unittest.TestCase):
 
         self.assertEqual(set(quotes), {"A", "B", "C", "D", "E"})
         self.assertEqual(api.quote_list_calls, (("A", "B"), ("C", "D"), ("E",)))
+
+    def test_live_quote_subscription_rejects_oversized_symbol_text(self) -> None:
+        api = _FakeApi(events=())
+        data_source = _FakeLiveDataSource(api, quote_subscription_batch_size=500)
+        symbols = [f"SHFE.very_long_option_symbol_{index:05d}_{'x' * 80}" for index in range(1000)]
+
+        with self.assertRaisesRegex(ConfigError, "Live quote subscription is too large"):
+            data_source._subscribe_live_quotes(api, symbols)
+
+        self.assertEqual(api.quote_list_calls, ())
 
 
 def _full_scan_events(

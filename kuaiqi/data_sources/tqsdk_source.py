@@ -15,6 +15,7 @@ from kuaiqi.models import InstrumentMeta, MarketSnapshot, Universe
 
 FUTURE_EXCHANGES = {"CFFEX", "SHFE", "DCE", "CZCE", "INE", "GFEX"}
 LIQUIDITY_FILTER_TIMEOUT_SECONDS = 30
+TQSDK_SUBSCRIBE_SYMBOL_TEXT_LIMIT = 100_000
 
 
 @dataclass
@@ -267,6 +268,7 @@ class TqSdkDataSource:
         if not symbols:
             self.logger.warning("No symbols to subscribe.")
             return
+        _validate_live_subscription_size(symbols)
         api = self._consume_live_api() or self._create_api()
         try:
             quotes = self._subscribe_live_quotes(api, symbols)
@@ -327,6 +329,7 @@ class TqSdkDataSource:
                 api.close()
 
     def _subscribe_live_quotes(self, api: Any, symbols: list[str]) -> dict[str, Any]:
+        _validate_live_subscription_size(symbols)
         quotes: dict[str, Any] = {}
         batch_size = self.config.tqsdk.quote_subscription_batch_size
         batches = list(_batches(symbols, batch_size))
@@ -746,6 +749,19 @@ def _order_backtest_symbols(universe: Universe, symbols: list[str]) -> list[str]
     ordered = [symbol for symbol in underlyings if symbol in symbols]
     ordered.extend(symbol for symbol in symbols if symbol not in set(ordered))
     return ordered
+
+
+def _validate_live_subscription_size(symbols: list[str]) -> None:
+    symbol_text_length = len(",".join(symbols))
+    if symbol_text_length <= TQSDK_SUBSCRIBE_SYMBOL_TEXT_LIMIT:
+        return
+    raise ConfigError(
+        "Live quote subscription is too large after universe filtering: "
+        f"{len(symbols)} symbols, symbol text length={symbol_text_length}, "
+        f"limit={TQSDK_SUBSCRIBE_SYMBOL_TEXT_LIMIT}. "
+        "Narrow universe.mode/underlyings/exchange_ids or increase liquidity filters "
+        "before starting live monitoring."
+    )
 
 
 def _batches(symbols: list[str], batch_size: int) -> Iterator[list[str]]:
