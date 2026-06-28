@@ -217,6 +217,16 @@ class LivePriceCacheTests(unittest.TestCase):
         self.assertEqual(set(quotes), {"A", "B", "C", "D", "E"})
         self.assertEqual(api.quote_list_calls, (("A", "B"), ("C", "D"), ("E",)))
 
+    def test_live_quote_subscription_caps_large_configured_batches(self) -> None:
+        api = _FakeApi(events=())
+        data_source = _FakeLiveDataSource(api, quote_subscription_batch_size=500)
+        symbols = [f"S{index}" for index in range(205)]
+
+        quotes = data_source._subscribe_live_quotes(api, symbols)
+
+        self.assertEqual(set(quotes), set(symbols))
+        self.assertEqual([len(call) for call in api.quote_list_calls], [100, 100, 5])
+
     def test_live_quote_subscription_rejects_oversized_symbol_text(self) -> None:
         api = _FakeApi(events=())
         data_source = _FakeLiveDataSource(api, quote_subscription_batch_size=500)
@@ -226,6 +236,20 @@ class LivePriceCacheTests(unittest.TestCase):
             data_source._subscribe_live_quotes(api, symbols)
 
         self.assertEqual(api.quote_list_calls, ())
+
+    def test_live_quote_subscription_summarizes_batch_timeout(self) -> None:
+        api = _FailingQuoteApi(events=(), error=TimeoutError("raw " + "x" * 5000))
+        data_source = _FakeLiveDataSource(api, quote_subscription_batch_size=500)
+        symbols = [f"S{index}" for index in range(150)]
+
+        with self.assertRaises(ConfigError) as raised:
+            data_source._subscribe_live_quotes(api, symbols)
+
+        message = str(raised.exception)
+        self.assertIn("Live quote subscription failed at batch 1/2", message)
+        self.assertIn("Batch has 100 symbols", message)
+        self.assertIn("first symbols: S0, S1", message)
+        self.assertLess(len(message), 500)
 
 
 def _full_scan_events(
@@ -369,6 +393,16 @@ class _FakeApi:
     def close(self) -> None:
         self.close_count += 1
         self.closed = True
+
+
+class _FailingQuoteApi(_FakeApi):
+    def __init__(self, events: tuple[_FakeEvent, ...], error: Exception) -> None:
+        super().__init__(events)
+        self.error = error
+
+    def get_quote_list(self, symbols: list[str]) -> list[_FakeQuote]:
+        self.quote_list_calls = (*self.quote_list_calls, tuple(symbols))
+        raise self.error
 
 
 class _FakeSymbolInfoFrame:
