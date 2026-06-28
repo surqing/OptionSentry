@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import logging
 import math
+import sys
 import unittest
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -247,6 +250,34 @@ class LivePriceCacheTests(unittest.TestCase):
         self.assertEqual(api.quote_list_calls, ())
 
 
+class BacktestKlineInitializationTests(unittest.TestCase):
+    def test_backtest_finished_prunes_symbols_without_ready_prices(self) -> None:
+        data_source = _FakeBacktestDataSource()
+        serials = {
+            "A": _FakeSerial("2026-01-02 09:31:00", 10.0),
+            "B": _FakeSerial("", math.nan),
+        }
+        api = _FakeBacktestApi(raise_finished=True)
+
+        with _quiet_tqsdk_output():
+            backtest_finished = data_source._wait_for_batch_prices(api, serials, ["A", "B"], 1, 1)
+
+        self.assertTrue(backtest_finished)
+        self.assertEqual(set(serials), {"A"})
+
+    def test_backtest_finished_without_any_ready_prices_still_fails(self) -> None:
+        data_source = _FakeBacktestDataSource()
+        serials = {
+            "A": _FakeSerial("", math.nan),
+            "B": _FakeSerial("", math.nan),
+        }
+        api = _FakeBacktestApi(raise_finished=True)
+
+        with self.assertRaisesRegex(ConfigError, "no usable prices"):
+            with _quiet_tqsdk_output():
+                data_source._wait_for_batch_prices(api, serials, ["A", "B"], 1, 1)
+
+
 def _full_scan_events(
     strategies: tuple[Strategy, ...],
     snapshots: tuple[MarketSnapshot, ...],
@@ -284,6 +315,12 @@ def _incremental_events(
         )
         initialized = True
     return events
+
+
+@contextlib.contextmanager
+def _quiet_tqsdk_output():
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        yield
 
 
 def _one_strike_universe() -> Universe:
@@ -348,6 +385,48 @@ class _FakeQuote:
     symbol: str
     datetime: str = ""
     last_price: float = math.nan
+
+
+class _FakeSerial:
+    def __init__(self, row_datetime: str, close: float, ready: bool = True) -> None:
+        self._row = SimpleNamespace(datetime=row_datetime, close=close)
+        self.ready = ready
+
+    @property
+    def iloc(self) -> "_FakeSerial":
+        return self
+
+    def __getitem__(self, _index: int) -> Any:
+        return self._row
+
+
+class _FakeLoop:
+    def is_closed(self) -> bool:
+        return True
+
+
+class _FakeBacktestApi:
+    _web_gui = False
+
+    def __init__(self, raise_finished: bool = False) -> None:
+        self.raise_finished = raise_finished
+        self._loop = _FakeLoop()
+
+    def is_serial_ready(self, serial: _FakeSerial) -> bool:
+        return serial.ready
+
+    def wait_update(self, deadline: float | None = None) -> bool:
+        if self.raise_finished:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                from tqsdk.exceptions import BacktestFinished
+
+            original_hook = sys.excepthook
+            original_backtest_hook = BacktestFinished._orig_excepthook
+            exc = BacktestFinished(self)
+            sys.excepthook = original_hook
+            BacktestFinished._orig_excepthook = original_backtest_hook
+            raise exc
+        return False
 
 
 class _FakeApi:
@@ -430,6 +509,19 @@ class _FakeLiveDataSource(TqSdkDataSource):
     def _create_api(self) -> _FakeApi:
         self.create_api_calls += 1
         return self.api
+
+
+class _FakeBacktestDataSource(TqSdkDataSource):
+    def __init__(self) -> None:
+        self.config = SimpleNamespace(
+            backtest=SimpleNamespace(
+                initial_price_timeout_seconds=0,
+            ),
+        )
+        self.stop_requested = None
+        self.logger = logging.getLogger("tests.backtest_initialization")
+        self.logger.handlers = [logging.NullHandler()]
+        self.logger.propagate = False
 
 
 if __name__ == "__main__":

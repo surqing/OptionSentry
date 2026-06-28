@@ -362,6 +362,7 @@ class TqSdkDataSource:
         api = self._create_api()
         try:
             serials = self._create_backtest_serials(api, symbols)
+            symbols = [symbol for symbol in symbols if symbol in serials]
             self.logger.info("Subscribed backtest K-lines: %s", len(serials))
             last_datetime: Any = None
             last_ready_count = -1
@@ -457,11 +458,27 @@ class TqSdkDataSource:
                 error = task.exception()
                 if error is not None:
                     raise error
-            self._wait_for_batch_prices(api, serials, batch, batch_index, len(batches))
+            backtest_finished = self._wait_for_batch_prices(api, serials, batch, batch_index, len(batches))
+            if backtest_finished:
+                self.logger.info(
+                    "Stopping further backtest K-line subscriptions after batch %s/%s because "
+                    "the backtest ended during initialization.",
+                    batch_index,
+                    len(batches),
+                )
+                break
 
+        if not serials:
+            raise ConfigError("Backtest did not receive usable K-line prices for any subscribed symbol.")
         if len(serials) != len(symbols):
-            raise ConfigError(
-                f"Only subscribed {len(serials)}/{len(symbols)} backtest K-line series."
+            skipped = sorted(set(symbols) - set(serials))
+            self.logger.warning(
+                "Backtest K-line initialization kept %s/%s symbols; skipped %s symbols with "
+                "missing K-line prices. First 20 skipped: %s",
+                len(serials),
+                len(symbols),
+                len(skipped),
+                skipped[:20],
             )
         return serials
 
@@ -472,7 +489,7 @@ class TqSdkDataSource:
         batch: list[str],
         batch_index: int,
         batch_count: int,
-    ) -> None:
+    ) -> bool:
         from tqsdk.exceptions import BacktestFinished
 
         timeout = max(
@@ -514,20 +531,59 @@ class TqSdkDataSource:
                     len(batch),
                 )
             if ready_count == len(batch):
-                return
+                return False
             if now > deadline:
-                missing = sorted(set(batch) - set(prices))
-                raise ConfigError(
-                    f"Backtest K-line batch {batch_index}/{batch_count} did not initialize "
-                    f"within {int(timeout)} seconds. Missing {len(missing)} symbols, "
-                    f"first 20: {missing[:20]}"
+                self._prune_unready_backtest_symbols(
+                    serials,
+                    batch,
+                    prices,
+                    f"did not initialize within {int(timeout)} seconds",
+                    batch_index,
+                    batch_count,
                 )
+                return False
             try:
                 api.wait_update(deadline=time.time() + 5)
-            except BacktestFinished as exc:
-                raise ConfigError(
-                    f"Backtest finished before K-line batch {batch_index}/{batch_count} initialized."
-                ) from exc
+            except BacktestFinished:
+                self._prune_unready_backtest_symbols(
+                    serials,
+                    batch,
+                    prices,
+                    "finished before all symbols initialized",
+                    batch_index,
+                    batch_count,
+                )
+                return True
+
+    def _prune_unready_backtest_symbols(
+        self,
+        serials: dict[str, Any],
+        batch: list[str],
+        prices: dict[str, float],
+        reason: str,
+        batch_index: int,
+        batch_count: int,
+    ) -> None:
+        missing = sorted(set(batch) - set(prices))
+        if not prices:
+            raise ConfigError(
+                f"Backtest K-line batch {batch_index}/{batch_count} {reason}; "
+                f"no usable prices were received. Missing {len(missing)} symbols, "
+                f"first 20: {missing[:20]}"
+            )
+        for symbol in missing:
+            serials.pop(symbol, None)
+        self.logger.warning(
+            "Backtest K-line batch %s/%s %s; continuing with %s/%s ready symbols. "
+            "Skipped %s symbols, first 20: %s",
+            batch_index,
+            batch_count,
+            reason,
+            len(prices),
+            len(batch),
+            len(missing),
+            missing[:20],
+        )
 
     def _collect_synced_backtest_prices(
         self,
