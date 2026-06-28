@@ -132,6 +132,18 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertFalse(main_window.start_button.isEnabled())
         self.assertTrue(main_window.stop_button.isEnabled())
 
+        main_window.config_editor.runtime_mode.setCurrentText("live")
+        event = _FakeWheelEvent()
+        main_window.config_editor.runtime_mode.wheelEvent(event)
+        self.assertEqual(main_window.config_editor.runtime_mode.currentText(), "live")
+        self.assertTrue(event.ignored)
+
+        main_window.config_editor.universe_mode.setCurrentText("all")
+        event = _FakeWheelEvent()
+        main_window.config_editor.universe_mode.wheelEvent(event)
+        self.assertEqual(main_window.config_editor.universe_mode.currentText(), "all")
+        self.assertTrue(event.ignored)
+
         spin = _spin(0, 10)
         spin.setValue(5)
         event = _FakeWheelEvent()

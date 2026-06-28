@@ -475,7 +475,7 @@ class ConfigEditor(QWidget):
     def _build_runtime(self) -> None:
         box = QGroupBox("运行")
         form = QFormLayout(box)
-        self.runtime_mode = QComboBox()
+        self.runtime_mode = NoWheelComboBox()
         self.runtime_mode.addItems(("live", "backtest"))
         self.price_basis = QLineEdit("last")
         self.price_basis.setReadOnly(True)
@@ -488,7 +488,7 @@ class ConfigEditor(QWidget):
     def _build_universe(self) -> None:
         box = QGroupBox("合约范围")
         form = QFormLayout(box)
-        self.universe_mode = QComboBox()
+        self.universe_mode = NoWheelComboBox()
         self.universe_mode.addItems(("all", "underlyings", "symbols"))
         self.underlyings = QTextEdit()
         self.underlyings.setFixedHeight(70)
@@ -565,7 +565,7 @@ class ConfigEditor(QWidget):
     def _build_notifier(self) -> None:
         box = QGroupBox("通知")
         form = QFormLayout(box)
-        self.notifier_kind = QComboBox()
+        self.notifier_kind = NoWheelComboBox()
         self.notifier_kind.addItems(("", "console", "email"))
         self.alert_log_path = QLineEdit()
         self.smtp_host = QLineEdit()
@@ -595,7 +595,7 @@ class ConfigEditor(QWidget):
     def _build_logging(self) -> None:
         box = QGroupBox("日志")
         form = QFormLayout(box)
-        self.log_level = QComboBox()
+        self.log_level = NoWheelComboBox()
         self.log_level.addItems(("DEBUG", "INFO", "WARNING", "ERROR"))
         self.log_dir = QLineEdit()
         self.log_file = QLineEdit()
@@ -867,6 +867,11 @@ class NoWheelSpinBox(QSpinBox):
 
 
 class NoWheelDoubleSpinBox(QDoubleSpinBox):
+    def wheelEvent(self, event: Any) -> None:
+        event.ignore()
+
+
+class NoWheelComboBox(QComboBox):
     def wheelEvent(self, event: Any) -> None:
         event.ignore()
 
