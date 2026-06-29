@@ -40,7 +40,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from kuaiqi.config import AppConfig, ConfigError, load_config
+from kuaiqi.config import AppConfig, ActiveAlertsViewConfig, ConfigError, load_config
 from kuaiqi.gui.config_store import data_to_config, save_config
 from kuaiqi.gui.credentials import CredentialResolution, load_and_validate_login
 from kuaiqi.gui.runner_adapter import GuiRunSignals, build_gui_runner
@@ -51,6 +51,15 @@ from kuaiqi.runner import RunnerCycle
 APP_NAME = "期权预警系统"
 APP_ICON_PATH = Path(__file__).with_name("assets") / "app_icon.svg"
 ALL_STRATEGIES_LABEL = "全部策略"
+ACTIVE_REFRESH_OPTIONS = (
+    ("10s", 10),
+    ("30s", 30),
+    ("1min", 60),
+    ("3min", 180),
+    ("5min", 300),
+    ("10min", 600),
+)
+MANUAL_ACTIVE_REFRESH_TIMEOUT_MS = 3000
 SORT_COLUMN_PROPERTY = "kuaiqi_sort_column"
 SORT_LABEL_PROPERTY = "kuaiqi_sort_label"
 SORT_ORDER_PROPERTY = "kuaiqi_sort_order"
@@ -411,6 +420,16 @@ class MainWindow(QMainWindow):
         self._monitor_thread: QThread | None = None
         self._monitor_worker: MonitorWorker | None = None
         self._running = False
+        self._latest_active_records: tuple[_EvaluationRecord, ...] = ()
+        self._latest_active_cycle_count = 0
+        self._last_displayed_active_cycle_count = 0
+        self._manual_active_refresh_pending = False
+        self._applying_active_refresh_config = False
+        self._active_auto_refresh_timer = QTimer(self)
+        self._active_auto_refresh_timer.timeout.connect(self._refresh_active_table_from_cache)
+        self._manual_active_refresh_timeout = QTimer(self)
+        self._manual_active_refresh_timeout.setSingleShot(True)
+        self._manual_active_refresh_timeout.timeout.connect(self._on_active_manual_refresh_timeout)
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon())
         self.resize(1180, 760)
@@ -485,7 +504,18 @@ class MainWindow(QMainWindow):
             grid.addWidget(value, row, column + 1)
         layout.addWidget(status_box)
 
-        self.active_view = StrategyEvaluationTable("当前触发")
+        self.active_view = StrategyEvaluationTable("当前活跃预警记录")
+        self.manual_active_refresh_button = QPushButton("手动刷新")
+        self.manual_active_refresh_button.clicked.connect(self._request_active_manual_refresh)
+        self.auto_active_refresh = QCheckBox("自动刷新")
+        self.auto_active_refresh.stateChanged.connect(self._on_active_auto_refresh_changed)
+        self.active_refresh_interval = NoWheelComboBox()
+        for label, seconds in ACTIVE_REFRESH_OPTIONS:
+            self.active_refresh_interval.addItem(label, seconds)
+        self.active_refresh_interval.currentIndexChanged.connect(self._on_active_refresh_interval_changed)
+        self.active_view.add_toolbar_widget(self.manual_active_refresh_button)
+        self.active_view.add_toolbar_widget(self.auto_active_refresh)
+        self.active_view.add_toolbar_widget(self.active_refresh_interval)
         self.active_table = self.active_view.table
         layout.addWidget(self.active_view, 1)
         return tab
@@ -509,6 +539,7 @@ class MainWindow(QMainWindow):
 
     def _load_config_into_editor(self, config: AppConfig) -> None:
         self.config_editor.set_config(config)
+        self._set_active_refresh_config(config.gui.active_alerts)
         self._sync_config_summary(config)
 
     def _sync_config_summary(self, config: AppConfig) -> None:
@@ -522,12 +553,13 @@ class MainWindow(QMainWindow):
         if self._running:
             return
         try:
-            self.config = self.config_editor.build_config()
+            self.config = self._config_with_active_refresh(self.config_editor.build_config())
         except Exception as exc:
             QMessageBox.warning(self, "配置错误", str(exc))
             return
         self._sync_config_summary(self.config)
         self.alert_view.clear_records()
+        self._reset_active_records()
         self.active_view.clear_records()
         self._append_log("Starting monitor")
         self._set_running(True)
@@ -549,6 +581,7 @@ class MainWindow(QMainWindow):
         self._monitor_thread.start()
 
     def _stop_monitor(self) -> None:
+        self._cancel_active_manual_refresh()
         if self._monitor_worker is not None:
             self._set_status("status", "stopping")
             self._monitor_worker.stop()
@@ -558,6 +591,7 @@ class MainWindow(QMainWindow):
         self._append_log(f"Monitor stopped, alerts={alert_count}")
         self._monitor_worker = None
         self._monitor_thread = None
+        self._cancel_active_manual_refresh()
         self._set_running(False)
 
     def _on_monitor_failed(self, message: str) -> None:
@@ -578,7 +612,11 @@ class MainWindow(QMainWindow):
         self._set_status("active", str(cycle.active_count))
         self._set_status("alerts", str(cycle.total_alerts))
         self._set_status("timestamp", _format_status_timestamp(cycle.timestamp))
-        self._populate_active_table(cycle.timestamp, cycle.evaluations)
+        self._cache_active_records(cycle)
+        if self._manual_active_refresh_pending:
+            self._complete_active_manual_refresh()
+        elif self.auto_active_refresh.isChecked() and self._last_displayed_active_cycle_count == 0:
+            self._refresh_active_table_from_cache()
 
     def _on_alert(self, event: AlertEvent) -> None:
         follow_latest = _table_is_at_bottom(self.alert_table)
@@ -592,6 +630,108 @@ class MainWindow(QMainWindow):
         active = [evaluation for evaluation in evaluations if evaluation.active]
         self.active_view.set_records(_EvaluationRecord(timestamp, evaluation) for evaluation in active)
 
+    def _cache_active_records(self, cycle: RunnerCycle) -> None:
+        self._latest_active_records = tuple(
+            _EvaluationRecord(cycle.timestamp, evaluation)
+            for evaluation in cycle.evaluations
+            if evaluation.active
+        )
+        self._latest_active_cycle_count = cycle.cycle_count
+
+    def _reset_active_records(self) -> None:
+        self._latest_active_records = ()
+        self._latest_active_cycle_count = 0
+        self._last_displayed_active_cycle_count = 0
+        self._cancel_active_manual_refresh()
+
+    def _refresh_active_table_from_cache(self) -> None:
+        self.active_view.set_records(self._latest_active_records)
+        self._last_displayed_active_cycle_count = self._latest_active_cycle_count
+
+    def _request_active_manual_refresh(self) -> None:
+        if not self._running:
+            QMessageBox.information(self, "无法刷新", "监控未运行，无法获取最新数据。")
+            return
+        if self._manual_active_refresh_pending:
+            return
+        self._manual_active_refresh_pending = True
+        self.manual_active_refresh_button.setEnabled(False)
+        self.manual_active_refresh_button.setText("刷新中...")
+        self._manual_active_refresh_timeout.start(MANUAL_ACTIVE_REFRESH_TIMEOUT_MS)
+
+    def _complete_active_manual_refresh(self) -> None:
+        self._manual_active_refresh_timeout.stop()
+        self._manual_active_refresh_pending = False
+        self.manual_active_refresh_button.setEnabled(True)
+        self.manual_active_refresh_button.setText("手动刷新")
+        self._refresh_active_table_from_cache()
+
+    def _cancel_active_manual_refresh(self) -> None:
+        self._manual_active_refresh_timeout.stop()
+        if not self._manual_active_refresh_pending:
+            return
+        self._manual_active_refresh_pending = False
+        self.manual_active_refresh_button.setEnabled(True)
+        self.manual_active_refresh_button.setText("手动刷新")
+
+    def _on_active_manual_refresh_timeout(self) -> None:
+        if not self._manual_active_refresh_pending:
+            return
+        self._manual_active_refresh_pending = False
+        self.manual_active_refresh_button.setEnabled(True)
+        self.manual_active_refresh_button.setText("手动刷新")
+        QMessageBox.warning(self, "刷新失败", "3秒内未收到新的行情数据，无法刷新当前活跃预警记录。")
+
+    def _on_active_auto_refresh_changed(self) -> None:
+        if self._applying_active_refresh_config:
+            return
+        self._apply_active_auto_refresh_settings(refresh_now=True)
+
+    def _on_active_refresh_interval_changed(self) -> None:
+        if self._applying_active_refresh_config:
+            return
+        self._apply_active_auto_refresh_settings(refresh_now=True)
+
+    def _apply_active_auto_refresh_settings(self, refresh_now: bool) -> None:
+        if self.auto_active_refresh.isChecked():
+            self._active_auto_refresh_timer.start(self._active_refresh_interval_seconds() * 1000)
+            if refresh_now:
+                self._refresh_active_table_from_cache()
+        else:
+            self._active_auto_refresh_timer.stop()
+
+    def _set_active_refresh_config(self, config: ActiveAlertsViewConfig) -> None:
+        self._applying_active_refresh_config = True
+        try:
+            self.auto_active_refresh.setChecked(config.auto_refresh)
+            self._set_active_refresh_interval_seconds(config.refresh_interval_seconds)
+        finally:
+            self._applying_active_refresh_config = False
+        self._apply_active_auto_refresh_settings(refresh_now=True)
+
+    def _set_active_refresh_interval_seconds(self, seconds: int) -> None:
+        for index in range(self.active_refresh_interval.count()):
+            if int(self.active_refresh_interval.itemData(index)) == seconds:
+                self.active_refresh_interval.setCurrentIndex(index)
+                return
+        self.active_refresh_interval.setCurrentIndex(0)
+
+    def _active_refresh_interval_seconds(self) -> int:
+        data = self.active_refresh_interval.currentData()
+        return int(data) if data is not None else 10
+
+    def _current_active_refresh_config(self) -> ActiveAlertsViewConfig:
+        return ActiveAlertsViewConfig(
+            auto_refresh=self.auto_active_refresh.isChecked(),
+            refresh_interval_seconds=self._active_refresh_interval_seconds(),
+        )
+
+    def _config_with_active_refresh(self, config: AppConfig) -> AppConfig:
+        return replace(
+            config,
+            gui=replace(config.gui, active_alerts=self._current_active_refresh_config()),
+        )
+
     def _set_strategy_filters(self, config: AppConfig) -> None:
         strategy_names = [strategy.name or strategy.type for strategy in config.selected_strategies]
         self.active_view.set_strategy_names(strategy_names)
@@ -599,7 +739,7 @@ class MainWindow(QMainWindow):
 
     def _save_config(self) -> None:
         try:
-            config = self.config_editor.build_config()
+            config = self._config_with_active_refresh(self.config_editor.build_config())
             save_config(self.config_path, config)
         except Exception as exc:
             QMessageBox.warning(self, "保存失败", str(exc))
@@ -742,6 +882,8 @@ class StrategyEvaluationTable(QGroupBox):
         self._filter_layout = QHBoxLayout()
         filter_row.addLayout(self._filter_layout)
         filter_row.addStretch(1)
+        self._toolbar_layout = QHBoxLayout()
+        filter_row.addLayout(self._toolbar_layout)
         layout.addLayout(filter_row)
 
         self.table = QTableWidget(0, 0)
@@ -758,6 +900,9 @@ class StrategyEvaluationTable(QGroupBox):
 
     def filter_labels(self) -> tuple[str, ...]:
         return tuple(button.text() for button in self._buttons.values())
+
+    def add_toolbar_widget(self, widget: QWidget) -> None:
+        self._toolbar_layout.addWidget(widget)
 
     def set_strategy_filter(self, strategy_name: str | None) -> None:
         if strategy_name is not None and strategy_name not in self._strategy_names:

@@ -113,6 +113,31 @@ class GuiConfigStoreTests(unittest.TestCase):
             self.assertIn('password_env = "MAIL_PASSWORD_ENV"', text)
             self.assertEqual(saved.notifier.email.password, "plain-email-secret")
 
+    def test_save_config_writes_active_alert_refresh_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "config.toml"
+            config = parse_config(
+                {
+                    "gui": {
+                        "active_alerts": {
+                            "auto_refresh": False,
+                            "refresh_interval_seconds": 180,
+                        }
+                    },
+                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                }
+            )
+
+            save_config(path, config)
+
+            text = path.read_text(encoding="utf-8")
+            saved = parse_config(config_to_data(config))
+            self.assertIn("[gui.active_alerts]", text)
+            self.assertIn("auto_refresh = false", text)
+            self.assertIn("refresh_interval_seconds = 180", text)
+            self.assertFalse(saved.gui.active_alerts.auto_refresh)
+            self.assertEqual(saved.gui.active_alerts.refresh_interval_seconds, 180)
+
 
 if __name__ == "__main__":
     unittest.main()

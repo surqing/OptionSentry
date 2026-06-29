@@ -12,6 +12,9 @@ class ConfigError(ValueError):
     pass
 
 
+ACTIVE_ALERT_REFRESH_INTERVALS = frozenset({10, 30, 60, 180, 300, 600})
+
+
 @dataclass(frozen=True)
 class RuntimeConfig:
     mode: str = "live"
@@ -90,6 +93,17 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class ActiveAlertsViewConfig:
+    auto_refresh: bool = True
+    refresh_interval_seconds: int = 10
+
+
+@dataclass(frozen=True)
+class GuiConfig:
+    active_alerts: ActiveAlertsViewConfig = field(default_factory=ActiveAlertsViewConfig)
+
+
+@dataclass(frozen=True)
 class AppConfig:
     runtime: RuntimeConfig
     universe: UniverseConfig
@@ -98,6 +112,7 @@ class AppConfig:
     strategies: tuple[StrategyConfig, ...]
     notifier: NotifierConfig
     logging: LoggingConfig
+    gui: GuiConfig = field(default_factory=GuiConfig)
 
     @property
     def selected_strategies(self) -> tuple[StrategyConfig, ...]:
@@ -122,7 +137,8 @@ def parse_config(data: dict[str, Any]) -> AppConfig:
     strategies = _parse_strategies(data.get("strategies", []))
     notifier = _parse_notifier(data.get("notifier", {}), data.get("notifier.email", {}))
     logging_config = _parse_logging(data.get("logging", {}))
-    _validate_config(runtime, universe, backtest, strategies, logging_config)
+    gui = _parse_gui(data.get("gui", {}))
+    _validate_config(runtime, universe, backtest, strategies, logging_config, gui)
     return AppConfig(
         runtime=runtime,
         universe=universe,
@@ -131,6 +147,7 @@ def parse_config(data: dict[str, Any]) -> AppConfig:
         strategies=strategies,
         notifier=notifier,
         logging=logging_config,
+        gui=gui,
     )
 
 
@@ -241,12 +258,23 @@ def _parse_logging(data: dict[str, Any]) -> LoggingConfig:
     )
 
 
+def _parse_gui(data: dict[str, Any]) -> GuiConfig:
+    active_alerts_data = data.get("active_alerts", {}) or {}
+    return GuiConfig(
+        active_alerts=ActiveAlertsViewConfig(
+            auto_refresh=bool(active_alerts_data.get("auto_refresh", True)),
+            refresh_interval_seconds=int(active_alerts_data.get("refresh_interval_seconds", 10)),
+        )
+    )
+
+
 def _validate_config(
     runtime: RuntimeConfig,
     universe: UniverseConfig,
     backtest: BacktestConfig,
     strategies: tuple[StrategyConfig, ...],
     logging_config: LoggingConfig,
+    gui: GuiConfig,
 ) -> None:
     if runtime.mode not in {"live", "backtest"}:
         raise ConfigError("runtime.mode must be 'live' or 'backtest'.")
@@ -274,6 +302,11 @@ def _validate_config(
         raise ConfigError("logging.backup_count must be non-negative.")
     if logging_config.cycle_summary_interval_seconds < 0:
         raise ConfigError("logging.cycle_summary_interval_seconds must be non-negative.")
+    if gui.active_alerts.refresh_interval_seconds not in ACTIVE_ALERT_REFRESH_INTERVALS:
+        raise ConfigError(
+            "gui.active_alerts.refresh_interval_seconds must be one of "
+            "10, 30, 60, 180, 300, or 600."
+        )
     if not strategies:
         raise ConfigError("At least one [[strategies]] entry is required.")
     for strategy in strategies:

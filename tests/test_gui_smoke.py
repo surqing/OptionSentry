@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from kuaiqi.models import AlertEvent, ConditionEvaluation
 
@@ -80,6 +81,11 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(main_window.windowTitle(), APP_NAME)
         self.assertFalse(window.windowIcon().isNull())
         self.assertFalse(main_window.windowIcon().isNull())
+        self.assertEqual(main_window.active_view.title(), "当前活跃预警记录")
+        self.assertEqual(main_window.manual_active_refresh_button.text(), "手动刷新")
+        self.assertEqual(main_window.auto_active_refresh.text(), "自动刷新")
+        self.assertTrue(main_window.auto_active_refresh.isChecked())
+        self.assertEqual(main_window.active_refresh_interval.currentData(), 10)
         self.assertEqual(main_window.config_editor.build_config().runtime.mode, "live")
         self.assertEqual(main_window.findChildren(QToolBar), [])
         self.assertIs(main_window.save_action, main_window.config_editor.save_button)
@@ -311,6 +317,108 @@ class GuiSmokeTests(unittest.TestCase):
         app.processEvents()
         main_window.close()
 
+    def test_active_table_auto_refresh_uses_cached_cycles(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtWidgets import QApplication
+
+        from kuaiqi.config import parse_config
+        from kuaiqi.gui.app import MainWindow
+        from kuaiqi.gui.credentials import CredentialResolution
+
+        app = QApplication.instance() or QApplication([])
+        config = parse_config(
+            {
+                "gui": {
+                    "active_alerts": {
+                        "auto_refresh": False,
+                        "refresh_interval_seconds": 180,
+                    }
+                },
+                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+            }
+        )
+        main_window = MainWindow(
+            Path("config.toml"),
+            config,
+            CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
+        )
+
+        self.assertFalse(main_window.auto_active_refresh.isChecked())
+        self.assertEqual(main_window.active_refresh_interval.currentData(), 180)
+        self.assertFalse(main_window._active_auto_refresh_timer.isActive())
+
+        main_window._on_cycle(_cycle(1, value=1.0))
+        self.assertEqual(main_window.active_table.rowCount(), 0)
+
+        main_window.auto_active_refresh.setChecked(True)
+        self.assertTrue(main_window._active_auto_refresh_timer.isActive())
+        self.assertEqual(main_window._active_auto_refresh_timer.interval(), 180000)
+        self.assertEqual(main_window.active_table.item(0, 2).text(), "1.00000000")
+
+        main_window._on_cycle(_cycle(2, value=2.0))
+        self.assertEqual(main_window.active_table.item(0, 2).text(), "1.00000000")
+
+        main_window.active_refresh_interval.setCurrentIndex(0)
+        self.assertEqual(main_window._active_auto_refresh_timer.interval(), 10000)
+        self.assertEqual(main_window.active_table.item(0, 2).text(), "2.00000000")
+
+        main_window.auto_active_refresh.setChecked(False)
+        self.assertFalse(main_window._active_auto_refresh_timer.isActive())
+        main_window._on_cycle(_cycle(3, value=3.0))
+        self.assertEqual(main_window.active_table.item(0, 2).text(), "2.00000000")
+        app.processEvents()
+        main_window.close()
+
+    def test_active_table_manual_refresh_waits_for_next_cycle_and_times_out(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtWidgets import QApplication
+
+        from kuaiqi.config import parse_config
+        from kuaiqi.gui.app import MainWindow
+        from kuaiqi.gui.credentials import CredentialResolution
+
+        app = QApplication.instance() or QApplication([])
+        config = parse_config(
+            {
+                "gui": {"active_alerts": {"auto_refresh": False}},
+                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+            }
+        )
+        main_window = MainWindow(
+            Path("config.toml"),
+            config,
+            CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
+        )
+
+        with patch("kuaiqi.gui.app.QMessageBox.information") as information:
+            main_window._request_active_manual_refresh()
+        information.assert_called_once()
+        self.assertFalse(main_window._manual_active_refresh_pending)
+
+        main_window._set_running(True)
+        main_window._on_cycle(_cycle(1, value=1.0))
+        self.assertEqual(main_window.active_table.rowCount(), 0)
+        main_window._request_active_manual_refresh()
+        self.assertTrue(main_window._manual_active_refresh_pending)
+        self.assertFalse(main_window.manual_active_refresh_button.isEnabled())
+        self.assertTrue(main_window._manual_active_refresh_timeout.isActive())
+
+        main_window._on_cycle(_cycle(2, value=4.0))
+        self.assertFalse(main_window._manual_active_refresh_pending)
+        self.assertTrue(main_window.manual_active_refresh_button.isEnabled())
+        self.assertEqual(main_window.manual_active_refresh_button.text(), "手动刷新")
+        self.assertEqual(main_window.active_table.item(0, 2).text(), "4.00000000")
+
+        main_window._request_active_manual_refresh()
+        with patch("kuaiqi.gui.app.QMessageBox.warning") as warning:
+            main_window._on_active_manual_refresh_timeout()
+        warning.assert_called_once()
+        self.assertFalse(main_window._manual_active_refresh_pending)
+        self.assertTrue(main_window.manual_active_refresh_button.isEnabled())
+        main_window._set_running(False)
+        app.processEvents()
+        main_window.close()
+
     def test_login_success_remembers_credentials_and_shows_toast(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
@@ -445,6 +553,22 @@ def _evaluation(strategy_name: str = "cp_combo", suffix: str = "eval", value: fl
         threshold=0.1,
         symbols=("SHFE.au2608C600", "SHFE.au2608P600", "SHFE.au2608"),
         message=f"message {suffix}",
+    )
+
+
+def _cycle(cycle_count: int, value: float = 1.0, strategy_name: str = "cp_combo") -> object:
+    from kuaiqi.runner import RunnerCycle
+
+    return RunnerCycle(
+        cycle_count=cycle_count,
+        timestamp=f"t{cycle_count}",
+        evaluations=(_evaluation(strategy_name=strategy_name, suffix=f"cycle{cycle_count}", value=value),),
+        total_conditions=1,
+        active_count=1,
+        alerts=(),
+        total_alerts=0,
+        changed_count=1,
+        compute_ms=0.0,
     )
 
 

@@ -100,6 +100,8 @@ class UniverseTests(unittest.TestCase):
         self.assertEqual(config.universe.min_volume, 1.0)
         self.assertEqual(config.universe.min_open_interest, 2.0)
         self.assertEqual(config.logging.cycle_summary_interval_seconds, 60)
+        self.assertTrue(config.gui.active_alerts.auto_refresh)
+        self.assertEqual(config.gui.active_alerts.refresh_interval_seconds, 10)
 
         with self.assertRaises(ConfigError):
             parse_config(
@@ -117,6 +119,30 @@ class UniverseTests(unittest.TestCase):
                     "strategies": [{"type": "cp_combo", "threshold": 0.01}],
                 }
             )
+        with self.assertRaises(ConfigError):
+            parse_config(
+                {
+                    "runtime": {},
+                    "gui": {"active_alerts": {"refresh_interval_seconds": 11}},
+                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                }
+            )
+
+    def test_config_parses_active_alert_refresh_settings(self) -> None:
+        config = parse_config(
+            {
+                "gui": {
+                    "active_alerts": {
+                        "auto_refresh": False,
+                        "refresh_interval_seconds": 180,
+                    }
+                },
+                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+            }
+        )
+
+        self.assertFalse(config.gui.active_alerts.auto_refresh)
+        self.assertEqual(config.gui.active_alerts.refresh_interval_seconds, 180)
 
     def test_live_universe_filters_liquidity_from_metadata(self) -> None:
         api = _FakeDiscoveryApi(_liquidity_rows(include_metrics=True))

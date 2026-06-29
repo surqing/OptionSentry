@@ -24,6 +24,7 @@ def config_to_data(config: AppConfig) -> dict[str, Any]:
             "email": email,
         },
         "logging": asdict(config.logging),
+        "gui": asdict(config.gui),
     }
 
 
