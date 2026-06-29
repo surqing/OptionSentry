@@ -83,7 +83,7 @@ class EmailNotifier:
         message.attach(MIMEText(_email_plain_body(events), "plain", "utf-8"))
         message.attach(MIMEText(_email_html_body(events), "html", "utf-8"))
 
-        password = os.environ.get(self.config.password_env)
+        password = self.config.password or os.environ.get(self.config.password_env)
         with smtplib.SMTP(
             self.config.smtp_host,
             self.config.smtp_port,

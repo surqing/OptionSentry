@@ -66,6 +66,29 @@ class GuiConfigStoreTests(unittest.TestCase):
             self.assertIn('password_env = "TQSDK_PASSWORD"', text)
             self.assertNotIn("super-secret", text)
 
+    def test_save_config_writes_explicit_email_password(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "config.toml"
+            config = parse_config(
+                {
+                    "notifier": {
+                        "email": {
+                            "password": "plain-email-secret",
+                            "password_env": "MAIL_PASSWORD_ENV",
+                        }
+                    },
+                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                }
+            )
+
+            save_config(path, config)
+
+            text = path.read_text(encoding="utf-8")
+            saved = parse_config(config_to_data(config))
+            self.assertIn('password = "plain-email-secret"', text)
+            self.assertIn('password_env = "MAIL_PASSWORD_ENV"', text)
+            self.assertEqual(saved.notifier.email.password, "plain-email-secret")
+
 
 if __name__ == "__main__":
     unittest.main()

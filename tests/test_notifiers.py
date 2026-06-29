@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import smtplib
 import tempfile
 import unittest
@@ -91,6 +92,30 @@ class NotifierTests(unittest.TestCase):
         self.assertIn("价差比例小于阈值（0.1）", plain_body)
         self.assertIn("价差比例小于阈值（0.1）", html_body)
 
+    def test_email_password_prefers_config_value_over_environment(self) -> None:
+        email = EmailNotifier(
+            EmailConfig(
+                smtp_host="smtp.example.com",
+                from_addr="from@example.com",
+                to_addrs=("to@example.com",),
+                username="mail-user",
+                password="plain-secret",
+                password_env="MAIL_PASSWORD_ENV",
+                alert_interval_seconds=0,
+            )
+        )
+
+        with (
+            patch("kuaiqi.notifiers.smtplib.SMTP", _CapturingSMTP),
+            patch.dict(os.environ, {"MAIL_PASSWORD_ENV": "env-secret"}),
+        ):
+            _CapturingSMTP.calls = 0
+            _CapturingSMTP.messages = []
+            _CapturingSMTP.logins = []
+            email.notify(_event())
+
+        self.assertEqual(_CapturingSMTP.logins, [("mail-user", "plain-secret")])
+
     def test_email_failure_enters_backoff_and_recorder_keeps_writing(self) -> None:
         event = _event()
         email = EmailNotifier(
@@ -143,6 +168,7 @@ class NotifierTests(unittest.TestCase):
 class _CapturingSMTP:
     calls = 0
     messages: list[str] = []
+    logins: list[tuple[str, str]] = []
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         type(self).calls += 1
@@ -157,6 +183,7 @@ class _CapturingSMTP:
         return None
 
     def login(self, username: str, password: str) -> None:
+        type(self).logins.append((username, password))
         return None
 
     def sendmail(self, from_addr: str | None, to_addrs: list[str], message: str) -> None:

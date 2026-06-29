@@ -62,6 +62,7 @@ class EmailConfig:
     smtp_timeout_seconds: int = 10
     alert_interval_seconds: int = 60
     username: str | None = None
+    password: str | None = None
     password_env: str = "SMTP_PASSWORD"
     from_addr: str | None = None
     to_addrs: tuple[str, ...] = ()
@@ -207,6 +208,7 @@ def _parse_notifier(data: dict[str, Any], flat_email_data: dict[str, Any]) -> No
         smtp_timeout_seconds=int(email_data.get("smtp_timeout_seconds", 10)),
         alert_interval_seconds=alert_interval_seconds,
         username=_env_or_value(email_data.get("username"), "SMTP_USERNAME"),
+        password=str(email_data["password"]) if email_data.get("password") is not None else None,
         password_env=str(email_data.get("password_env", "SMTP_PASSWORD")),
         from_addr=_env_or_value(email_data.get("from_addr"), "ALERT_EMAIL_FROM"),
         to_addrs=_parse_recipients(email_data.get("to_addrs")),

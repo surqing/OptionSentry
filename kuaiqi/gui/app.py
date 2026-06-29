@@ -740,6 +740,8 @@ class ConfigEditor(QWidget):
         self.smtp_timeout_seconds = _spin(1, 300)
         self.alert_interval_seconds = _spin(0, 86400)
         self.email_username = QLineEdit()
+        self.email_password = QLineEdit()
+        self.email_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.email_password_env = QLineEdit()
         self.from_addr = QLineEdit()
         self.to_addrs = QLineEdit()
@@ -752,6 +754,7 @@ class ConfigEditor(QWidget):
         form.addRow("SMTP超时", self.smtp_timeout_seconds)
         form.addRow("邮件聚合秒数", self.alert_interval_seconds)
         form.addRow("邮箱账号", self.email_username)
+        form.addRow("邮箱密码", self.email_password)
         form.addRow("邮箱密码变量", self.email_password_env)
         form.addRow("发件人", self.from_addr)
         form.addRow("收件人", self.to_addrs)
@@ -813,6 +816,7 @@ class ConfigEditor(QWidget):
         self.smtp_timeout_seconds.setValue(config.notifier.email.smtp_timeout_seconds)
         self.alert_interval_seconds.setValue(config.notifier.email.alert_interval_seconds)
         self.email_username.setText(config.notifier.email.username or "")
+        self.email_password.setText(config.notifier.email.password or "")
         self.email_password_env.setText(config.notifier.email.password_env)
         self.from_addr.setText(config.notifier.email.from_addr or "")
         self.to_addrs.setText(", ".join(config.notifier.email.to_addrs))
@@ -869,6 +873,7 @@ class ConfigEditor(QWidget):
                     "smtp_timeout_seconds": self.smtp_timeout_seconds.value(),
                     "alert_interval_seconds": self.alert_interval_seconds.value(),
                     "username": self.email_username.text().strip() or None,
+                    "password": self.email_password.text() or None,
                     "password_env": self.email_password_env.text().strip() or "SMTP_PASSWORD",
                     "from_addr": self.from_addr.text().strip() or None,
                     "to_addrs": _split_csv(self.to_addrs.text()),
