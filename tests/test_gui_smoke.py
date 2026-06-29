@@ -273,6 +273,44 @@ class GuiSmokeTests(unittest.TestCase):
         app.processEvents()
         main_window.close()
 
+    def test_table_headers_filter_rows_by_numeric_range(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtWidgets import QApplication
+
+        from kuaiqi.config import parse_config
+        from kuaiqi.gui.app import MainWindow, _set_table_filter_text
+        from kuaiqi.gui.credentials import CredentialResolution
+
+        app = QApplication.instance() or QApplication([])
+        config = parse_config({"strategies": [{"type": "cp_combo", "threshold": 0.01}]})
+        main_window = MainWindow(
+            Path("config.toml"),
+            config,
+            CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
+        )
+        for value in (7.0, 8.0, 9.0, 10.0, 11.0):
+            main_window._on_alert(_alert_event(f"t{value}", value=value))
+
+        for expression in ("8 10", "8-10", "8,10", "8，10", "8~10"):
+            _set_table_filter_text(main_window.alert_table, 2, expression)
+            self.assertEqual(
+                _visible_column_texts(main_window.alert_table, 2),
+                ("8.00000000", "9.00000000", "10.00000000"),
+            )
+
+        main_window._on_alert(_alert_event("inside", value=9.5))
+        main_window._on_alert(_alert_event("outside", value=12.0))
+        self.assertEqual(
+            _visible_column_texts(main_window.alert_table, 2),
+            ("8.00000000", "9.00000000", "10.00000000", "9.50000000"),
+        )
+
+        _set_table_filter_text(main_window.alert_table, 2, "")
+        self.assertEqual(main_window.alert_table.rowCount(), 7)
+        self.assertEqual(len(_visible_column_texts(main_window.alert_table, 2)), 7)
+        app.processEvents()
+        main_window.close()
+
     def test_login_success_remembers_credentials_and_shows_toast(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
@@ -419,6 +457,14 @@ def _table_headers(table) -> tuple[str, ...]:
 
 def _column_texts(table, column: int) -> tuple[str, ...]:
     return tuple(table.item(row, column).text() for row in range(table.rowCount()))
+
+
+def _visible_column_texts(table, column: int) -> tuple[str, ...]:
+    return tuple(
+        table.item(row, column).text()
+        for row in range(table.rowCount())
+        if not table.isRowHidden(row)
+    )
 
 
 class _FakeWheelEvent:

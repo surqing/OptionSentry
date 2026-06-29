@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime
+import re
 import sys
 from pathlib import Path
 from typing import Any, Iterable
@@ -20,6 +21,7 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -52,6 +54,7 @@ ALL_STRATEGIES_LABEL = "全部策略"
 SORT_COLUMN_PROPERTY = "kuaiqi_sort_column"
 SORT_LABEL_PROPERTY = "kuaiqi_sort_label"
 SORT_ORDER_PROPERTY = "kuaiqi_sort_order"
+FILTERS_PROPERTY = "kuaiqi_filters"
 SORT_ROLE = Qt.ItemDataRole.UserRole
 TOAST_DURATION_MS = 1500
 TOAST_FADE_MS = 150
@@ -648,11 +651,21 @@ class _EvaluationRecord:
     evaluation: ConditionEvaluation
 
 
+@dataclass(frozen=True)
+class _RangeFilter:
+    text: str
+    lower: float
+    upper: float
+
+
 class SortableHeader(QHeaderView):
+    filterRequested = pyqtSignal(int)
+
     def __init__(self, orientation: Qt.Orientation, parent: QWidget | None = None) -> None:
         super().__init__(orientation, parent)
         self._sort_column: int | None = None
         self._sort_order = Qt.SortOrder.AscendingOrder
+        self._filtered_columns: set[int] = set()
         self.setSectionsClickable(True)
         self.setHighlightSections(False)
         self.setSortIndicatorShown(False)
@@ -662,18 +675,44 @@ class SortableHeader(QHeaderView):
         self._sort_order = order
         self.viewport().update()
 
+    def set_filter_state(self, columns: set[int]) -> None:
+        self._filtered_columns = set(columns)
+        self.viewport().update()
+
     def paintSection(self, painter: Any, rect: QRect, logical_index: int) -> None:
         super().paintSection(painter, rect, logical_index)
-        if rect.width() < 28:
+        if rect.width() < 48:
             return
         symbol = "⇅"
         if self._sort_column == logical_index:
             symbol = "▲" if self._sort_order == Qt.SortOrder.AscendingOrder else "▼"
-        button_rect = QRect(rect.right() - 24, rect.top() + 4, 20, max(12, rect.height() - 8))
         painter.save()
         painter.setPen(Qt.GlobalColor.darkGray)
-        painter.drawText(button_rect, Qt.AlignmentFlag.AlignCenter, symbol)
+        painter.drawText(self._sort_button_rect(rect), Qt.AlignmentFlag.AlignCenter, symbol)
+        painter.setPen(Qt.GlobalColor.blue if logical_index in self._filtered_columns else Qt.GlobalColor.darkGray)
+        painter.drawText(self._filter_button_rect(rect), Qt.AlignmentFlag.AlignCenter, "筛")
         painter.restore()
+
+    def mousePressEvent(self, event: Any) -> None:
+        position = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        logical_index = self.logicalIndexAt(position)
+        if logical_index >= 0:
+            rect = QRect(
+                self.sectionViewportPosition(logical_index),
+                0,
+                self.sectionSize(logical_index),
+                self.height(),
+            )
+            if self._filter_button_rect(rect).contains(position):
+                self.filterRequested.emit(logical_index)
+                return
+        super().mousePressEvent(event)
+
+    def _sort_button_rect(self, rect: QRect) -> QRect:
+        return QRect(rect.right() - 48, rect.top() + 4, 20, max(12, rect.height() - 8))
+
+    def _filter_button_rect(self, rect: QRect) -> QRect:
+        return QRect(rect.right() - 24, rect.top() + 4, 20, max(12, rect.height() - 8))
 
 
 class SortableTableWidgetItem(QTableWidgetItem):
@@ -793,6 +832,7 @@ class StrategyEvaluationTable(QGroupBox):
         for record in records:
             self._append_row(record, include_strategy)
         _restore_table_sort(self.table)
+        _apply_table_filters(self.table)
         if scroll_to_bottom:
             self.table.scrollToBottom()
         elif preserve_scroll:
@@ -1028,6 +1068,7 @@ class ConfigEditor(QWidget):
                 restore_sort=False,
             )
         _restore_table_sort(self.strategies)
+        _apply_table_filters(self.strategies)
         if config.backtest.start_dt is not None:
             self.backtest_start.setText(config.backtest.start_dt.isoformat())
         else:
@@ -1167,6 +1208,7 @@ class ConfigEditor(QWidget):
         self.strategies.setItem(row, 3, _table_item(name, sort_key=name.casefold()))
         if restore_sort:
             _restore_table_sort(self.strategies)
+            _apply_table_filters(self.strategies)
 
     def _remove_strategy_row(self) -> None:
         row = self.strategies.currentRow()
@@ -1186,6 +1228,7 @@ class ConfigEditor(QWidget):
             sort_key = item.text().casefold()
         if item.data(SORT_ROLE) != sort_key:
             item.setData(SORT_ROLE, sort_key)
+        _apply_table_filters(self.strategies)
 
 
 def _unique_names(names: Iterable[str]) -> tuple[str, ...]:
@@ -1216,9 +1259,29 @@ def _ensure_sortable_header(table: QTableWidget) -> SortableHeader:
         table.setHorizontalHeader(header)
     if not getattr(table, "_kuaiqi_sort_connected", False):
         header.sectionClicked.connect(lambda column, current_table=table: _toggle_table_sort(current_table, column))
+        header.filterRequested.connect(lambda column, current_table=table: _prompt_table_filter(current_table, column))
         setattr(table, "_kuaiqi_sort_connected", True)
     table.setSortingEnabled(False)
     return header
+
+
+def _prompt_table_filter(table: QTableWidget, column: int) -> None:
+    label = _header_label(table, column)
+    filters = _table_filters(table)
+    current = filters[label].text if label in filters else ""
+    text, ok = QInputDialog.getText(
+        table,
+        "筛选",
+        f"{label} 范围（例：8 10、8-10、8,10、8，10、8~10；留空清除）",
+        QLineEdit.EchoMode.Normal,
+        current,
+    )
+    if not ok:
+        return
+    try:
+        _set_table_filter_text(table, column, text)
+    except ValueError as exc:
+        QMessageBox.warning(table, "筛选条件无效", str(exc))
 
 
 def _toggle_table_sort(table: QTableWidget, column: int) -> None:
@@ -1252,6 +1315,81 @@ def _apply_table_sort(table: QTableWidget, column: int, order: Qt.SortOrder) -> 
     if isinstance(header, SortableHeader):
         header.set_sort_state(column, order)
     table.sortItems(column, order)
+
+
+def _set_table_filter_text(table: QTableWidget, column: int, text: str) -> None:
+    label = _header_label(table, column)
+    filters = _table_filters(table)
+    parsed = _parse_range_filter(text)
+    if parsed is None:
+        filters.pop(label, None)
+    else:
+        filters[label] = parsed
+    table.setProperty(FILTERS_PROPERTY, filters)
+    _apply_table_filters(table)
+
+
+def _apply_table_filters(table: QTableWidget) -> None:
+    filters = _table_filters(table)
+    active_filters: list[tuple[int, _RangeFilter]] = []
+    for label, range_filter in filters.items():
+        column = _column_for_header_label(table, label)
+        if column is not None:
+            active_filters.append((column, range_filter))
+    for row in range(table.rowCount()):
+        visible = all(_cell_matches_range_filter(table.item(row, column), range_filter) for column, range_filter in active_filters)
+        table.setRowHidden(row, not visible)
+    header = table.horizontalHeader()
+    if isinstance(header, SortableHeader):
+        header.set_filter_state({column for column, _range_filter in active_filters})
+
+
+def _table_filters(table: QTableWidget) -> dict[str, _RangeFilter]:
+    filters = table.property(FILTERS_PROPERTY)
+    if isinstance(filters, dict):
+        return dict(filters)
+    return {}
+
+
+def _parse_range_filter(text: str) -> _RangeFilter | None:
+    raw = str(text).strip()
+    if not raw:
+        return None
+    number = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+    hyphen_match = re.fullmatch(rf"\s*({number})\s*-\s*({number})\s*", raw)
+    if hyphen_match is not None:
+        parts = [hyphen_match.group(1), hyphen_match.group(2)]
+    else:
+        parts = [part for part in re.split(r"[\s,，~～]+", raw) if part]
+    if len(parts) == 1:
+        parts = [parts[0], parts[0]]
+    if len(parts) != 2:
+        raise ValueError("请输入一个数字，或两个数字组成的范围，例如 8 10、8-10、8,10、8，10、8~10。")
+    try:
+        lower = float(parts[0])
+        upper = float(parts[1])
+    except ValueError as exc:
+        raise ValueError("筛选范围只能包含数字。") from exc
+    if lower > upper:
+        lower, upper = upper, lower
+    return _RangeFilter(text=raw, lower=lower, upper=upper)
+
+
+def _cell_matches_range_filter(item: QTableWidgetItem | None, range_filter: _RangeFilter) -> bool:
+    value = _cell_numeric_value(item)
+    return value is not None and range_filter.lower <= value <= range_filter.upper
+
+
+def _cell_numeric_value(item: QTableWidgetItem | None) -> float | None:
+    if item is None:
+        return None
+    sort_key = item.data(SORT_ROLE)
+    if isinstance(sort_key, (int, float)) and not isinstance(sort_key, bool):
+        return float(sort_key)
+    try:
+        return float(item.text().strip())
+    except ValueError:
+        return None
 
 
 def _sort_order_from_property(value: object) -> Qt.SortOrder:
@@ -1446,7 +1584,7 @@ def _apply_style(app: QApplication) -> None:
             background: #eef2f5;
             border: 0;
             border-right: 1px solid #d8dee4;
-            padding: 6px 28px 6px 6px;
+            padding: 6px 52px 6px 6px;
             font-weight: 600;
         }
         QLabel#windowTitle {
