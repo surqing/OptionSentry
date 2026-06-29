@@ -14,7 +14,7 @@ from typing import Protocol
 
 from kuaiqi.config import AppConfig, ConfigError, EmailConfig
 from kuaiqi.log_paths import mode_scoped_file
-from kuaiqi.models import AlertEvent
+from kuaiqi.models import AlertEvent, ConditionEvaluation
 
 
 class NotificationError(RuntimeError):
@@ -282,7 +282,7 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
     if evaluation.strategy_name == "cp_combo" and parsed:
         monitor = f"{parsed.get('underlying', '')} {parsed.get('expiry', '')}".strip()
         strike = parsed.get("strike", "-")
-        value = _format_number(evaluation.value)
+        value = _format_evaluation_value(evaluation)
         threshold = _format_number(evaluation.threshold)
         return _EmailAlertRow(
             timestamp=str(event.timestamp),
@@ -292,14 +292,14 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
             strike=f"K={strike}" if strike else "-",
             value=value,
             threshold=threshold,
-            trigger_condition=_threshold_condition("偏离率", "大于", threshold),
+            trigger_condition=_threshold_condition("绝对偏离率", "大于", threshold),
             symbols=", ".join(evaluation.symbols),
         )
     if evaluation.strategy_name == "abs_spread" and parsed:
         direction = _option_class_label(parsed.get("option_class", ""))
         first_strike = parsed.get("first_strike", "")
         second_strike = parsed.get("second_strike", "")
-        value = _format_number(evaluation.value)
+        value = _format_evaluation_value(evaluation)
         threshold = _format_number(evaluation.threshold)
         return _EmailAlertRow(
             timestamp=str(event.timestamp),
@@ -318,7 +318,7 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
         monitor="-",
         structure="-",
         strike="-",
-        value=_format_number(evaluation.value),
+        value=_format_evaluation_value(evaluation),
         threshold=_format_number(evaluation.threshold),
         trigger_condition=_generic_threshold_condition(evaluation.value, evaluation.threshold),
         symbols=", ".join(evaluation.symbols),
@@ -352,6 +352,12 @@ def _generic_threshold_condition(value: float, threshold: float) -> str:
     else:
         relation = "等于"
     return _threshold_condition("当前指标值", relation, _format_number(threshold))
+
+
+def _format_evaluation_value(evaluation: ConditionEvaluation) -> str:
+    if evaluation.strategy_name == "cp_combo":
+        return _format_number(evaluation.value, show_positive_sign=True)
+    return _format_number(evaluation.value)
 
 
 def _strategy_label(strategy_name: str) -> str:
@@ -403,8 +409,9 @@ def _symbol_tail_number(symbol: str) -> str:
     return tail
 
 
-def _format_number(value: float) -> str:
-    return f"{value:.8f}".rstrip("0").rstrip(".")
+def _format_number(value: float, show_positive_sign: bool = False) -> str:
+    text = f"{value:+.8f}" if show_positive_sign else f"{value:.8f}"
+    return text.rstrip("0").rstrip(".")
 
 
 _TH_STYLE = (

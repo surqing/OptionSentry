@@ -149,7 +149,7 @@ class GuiSmokeTests(unittest.TestCase):
         main_window.alert_view.set_strategy_filter("cp_combo")
         self.assertNotIn("策略名", _table_headers(main_window.alert_table))
         self.assertEqual(main_window.alert_table.rowCount(), 1)
-        self.assertEqual(main_window.alert_table.item(0, 1).text(), "1.00000000")
+        self.assertEqual(main_window.alert_table.item(0, 1).text(), "+1.00000000")
         main_window.alert_view.set_strategy_filter(None)
         self.assertIn("策略名", _table_headers(main_window.alert_table))
         self.assertEqual(main_window.alert_table.rowCount(), 2)
@@ -173,6 +173,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(main_window.status_labels["timestamp"].text(), "2026-06-26 23:41:05.9")
         self.assertIn("策略名", _table_headers(main_window.active_table))
         self.assertEqual(main_window.active_table.rowCount(), 2)
+        self.assertEqual(main_window.active_table.item(0, 2).text(), "+1.00000000")
         main_window.active_view.set_strategy_filter("abs_spread")
         self.assertNotIn("策略名", _table_headers(main_window.active_table))
         self.assertEqual(main_window.active_table.rowCount(), 1)
@@ -251,18 +252,18 @@ class GuiSmokeTests(unittest.TestCase):
         )
         main_window._on_alert(_alert_event("t1", value=10.0))
         main_window._on_alert(_alert_event("t2", value=2.0))
-        main_window._on_alert(_alert_event("t3", value=1.0))
+        main_window._on_alert(_alert_event("t3", value=-1.0))
 
         main_window.alert_table.horizontalHeader().sectionClicked.emit(2)
         self.assertEqual(
             _column_texts(main_window.alert_table, 2),
-            ("1.00000000", "2.00000000", "10.00000000"),
+            ("-1.00000000", "+2.00000000", "+10.00000000"),
         )
 
         main_window.alert_table.horizontalHeader().sectionClicked.emit(2)
         self.assertEqual(
             _column_texts(main_window.alert_table, 2),
-            ("10.00000000", "2.00000000", "1.00000000"),
+            ("+10.00000000", "+2.00000000", "-1.00000000"),
         )
 
         main_window.config_editor.strategies.horizontalHeader().sectionClicked.emit(2)

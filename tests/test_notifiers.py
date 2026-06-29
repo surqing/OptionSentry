@@ -43,7 +43,7 @@ class NotifierTests(unittest.TestCase):
                     timestamp="t1",
                     key="cp_combo:SHFE.au2608:2026-8:K=600:SHFE.au2608C600:SHFE.au2608P600",
                     strategy_name="cp_combo",
-                    value=0.03559322,
+                    value=-0.03559322,
                     threshold=0.01,
                     symbols=("SHFE.au2608C600", "SHFE.au2608P600", "SHFE.au2608"),
                 )
@@ -88,7 +88,9 @@ class NotifierTests(unittest.TestCase):
         self.assertIn("价差预警", html_body)
         self.assertIn("认购 + 认沽 + 标的", html_body)
         self.assertIn("认沽", html_body)
-        self.assertIn("偏离率大于阈值（0.01）", plain_body)
+        self.assertIn("-0.03559322", plain_body)
+        self.assertIn("绝对偏离率大于阈值（0.01）", plain_body)
+        self.assertIn("绝对偏离率大于阈值（0.01）", html_body)
         self.assertIn("价差比例小于阈值（0.1）", plain_body)
         self.assertIn("价差比例小于阈值（0.1）", html_body)
 

@@ -25,7 +25,7 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(len(active), 1)
         self.assertAlmostEqual(active[0].value, (12.0 - 1.0 + 600.0 - 590.0) / 590.0)
 
-    def test_cp_combo_uses_absolute_threshold_for_negative_deviation(self) -> None:
+    def test_cp_combo_preserves_value_sign_for_negative_deviation(self) -> None:
         universe = sample_universe()
         snap = snapshot(
             universe,
@@ -40,8 +40,8 @@ class StrategyTests(unittest.TestCase):
 
         active = [item for item in evaluations if item.active]
         self.assertEqual(len(active), 1)
-        self.assertGreater(active[0].value, 0.01)
-        self.assertAlmostEqual(active[0].value, abs((1.0 - 20.0 + 600.0 - 590.0) / 590.0))
+        self.assertLess(active[0].value, -0.01)
+        self.assertAlmostEqual(active[0].value, (1.0 - 20.0 + 600.0 - 590.0) / 590.0)
 
     def test_cp_combo_skips_invalid_future_price(self) -> None:
         universe = sample_universe()
