@@ -21,6 +21,7 @@ class GuiSmokeTests(unittest.TestCase):
             TOAST_DURATION_MS,
             LoginWindow,
             MainWindow,
+            SortableHeader,
             _apply_style,
             _double_spin,
             _friendly_login_error,
@@ -117,6 +118,8 @@ class GuiSmokeTests(unittest.TestCase):
             main_window.alert_table,
             main_window.config_editor.strategies,
         ):
+            self.assertIsInstance(table.horizontalHeader(), SortableHeader)
+            self.assertTrue(table.horizontalHeader().sectionsClickable())
             self.assertEqual(
                 table.horizontalHeader().sectionResizeMode(0),
                 QHeaderView.ResizeMode.Interactive,
@@ -223,6 +226,51 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertTrue(event.ignored)
         main_window.close()
         window.close()
+
+    def test_table_headers_sort_rows_by_column_content(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtWidgets import QApplication
+
+        from kuaiqi.config import parse_config
+        from kuaiqi.gui.app import MainWindow
+        from kuaiqi.gui.credentials import CredentialResolution
+
+        app = QApplication.instance() or QApplication([])
+        config = parse_config(
+            {
+                "strategies": [
+                    {"type": "cp_combo", "threshold": 0.01},
+                    {"type": "abs_spread", "threshold": 0.1},
+                ]
+            }
+        )
+        main_window = MainWindow(
+            Path("config.toml"),
+            config,
+            CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
+        )
+        main_window._on_alert(_alert_event("t1", value=10.0))
+        main_window._on_alert(_alert_event("t2", value=2.0))
+        main_window._on_alert(_alert_event("t3", value=1.0))
+
+        main_window.alert_table.horizontalHeader().sectionClicked.emit(2)
+        self.assertEqual(
+            _column_texts(main_window.alert_table, 2),
+            ("1.00000000", "2.00000000", "10.00000000"),
+        )
+
+        main_window.alert_table.horizontalHeader().sectionClicked.emit(2)
+        self.assertEqual(
+            _column_texts(main_window.alert_table, 2),
+            ("10.00000000", "2.00000000", "1.00000000"),
+        )
+
+        main_window.config_editor.strategies.horizontalHeader().sectionClicked.emit(2)
+        self.assertEqual(_column_texts(main_window.config_editor.strategies, 2), ("0.01", "0.1"))
+        main_window.config_editor.strategies.horizontalHeader().sectionClicked.emit(2)
+        self.assertEqual(_column_texts(main_window.config_editor.strategies, 2), ("0.1", "0.01"))
+        app.processEvents()
+        main_window.close()
 
     def test_login_success_remembers_credentials_and_shows_toast(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -342,19 +390,19 @@ class GuiSmokeTests(unittest.TestCase):
             main_window.close()
 
 
-def _alert_event(timestamp: str, strategy_name: str = "cp_combo") -> AlertEvent:
+def _alert_event(timestamp: str, strategy_name: str = "cp_combo", value: float = 1.0) -> AlertEvent:
     return AlertEvent(
         timestamp=timestamp,
-        evaluation=_evaluation(strategy_name=strategy_name, suffix=timestamp),
+        evaluation=_evaluation(strategy_name=strategy_name, suffix=timestamp, value=value),
     )
 
 
-def _evaluation(strategy_name: str = "cp_combo", suffix: str = "eval") -> ConditionEvaluation:
+def _evaluation(strategy_name: str = "cp_combo", suffix: str = "eval", value: float = 1.0) -> ConditionEvaluation:
     return ConditionEvaluation(
         key=f"key:{strategy_name}:{suffix}",
         strategy_name=strategy_name,
         active=True,
-        value=1.0,
+        value=value,
         threshold=0.1,
         symbols=("SHFE.au2608C600", "SHFE.au2608P600", "SHFE.au2608"),
         message=f"message {suffix}",
@@ -366,6 +414,10 @@ def _table_headers(table) -> tuple[str, ...]:
         table.horizontalHeaderItem(column).text()
         for column in range(table.columnCount())
     )
+
+
+def _column_texts(table, column: int) -> tuple[str, ...]:
+    return tuple(table.item(row, column).text() for row in range(table.rowCount()))
 
 
 class _FakeWheelEvent:

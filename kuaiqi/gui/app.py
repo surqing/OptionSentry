@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-from PyQt6.QtCore import QEasingCurve, QObject, QPropertyAnimation, QTimer, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QObject, QPropertyAnimation, QRect, QTimer, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -49,6 +49,10 @@ from kuaiqi.runner import RunnerCycle
 APP_NAME = "期权预警系统"
 APP_ICON_PATH = Path(__file__).with_name("assets") / "app_icon.svg"
 ALL_STRATEGIES_LABEL = "全部策略"
+SORT_COLUMN_PROPERTY = "kuaiqi_sort_column"
+SORT_LABEL_PROPERTY = "kuaiqi_sort_label"
+SORT_ORDER_PROPERTY = "kuaiqi_sort_order"
+SORT_ROLE = Qt.ItemDataRole.UserRole
 TOAST_DURATION_MS = 1500
 TOAST_FADE_MS = 150
 
@@ -644,6 +648,46 @@ class _EvaluationRecord:
     evaluation: ConditionEvaluation
 
 
+class SortableHeader(QHeaderView):
+    def __init__(self, orientation: Qt.Orientation, parent: QWidget | None = None) -> None:
+        super().__init__(orientation, parent)
+        self._sort_column: int | None = None
+        self._sort_order = Qt.SortOrder.AscendingOrder
+        self.setSectionsClickable(True)
+        self.setHighlightSections(False)
+        self.setSortIndicatorShown(False)
+
+    def set_sort_state(self, column: int | None, order: Qt.SortOrder) -> None:
+        self._sort_column = column
+        self._sort_order = order
+        self.viewport().update()
+
+    def paintSection(self, painter: Any, rect: QRect, logical_index: int) -> None:
+        super().paintSection(painter, rect, logical_index)
+        if rect.width() < 28:
+            return
+        symbol = "⇅"
+        if self._sort_column == logical_index:
+            symbol = "▲" if self._sort_order == Qt.SortOrder.AscendingOrder else "▼"
+        button_rect = QRect(rect.right() - 24, rect.top() + 4, 20, max(12, rect.height() - 8))
+        painter.save()
+        painter.setPen(Qt.GlobalColor.darkGray)
+        painter.drawText(button_rect, Qt.AlignmentFlag.AlignCenter, symbol)
+        painter.restore()
+
+
+class SortableTableWidgetItem(QTableWidgetItem):
+    def __lt__(self, other: QTableWidgetItem) -> bool:
+        left = self.data(SORT_ROLE)
+        right = other.data(SORT_ROLE) if other is not None else None
+        if left is not None and right is not None:
+            try:
+                return left < right
+            except TypeError:
+                return str(left) < str(right)
+        return self.text().casefold() < other.text().casefold()
+
+
 class StrategyEvaluationTable(QGroupBox):
     def __init__(self, title: str) -> None:
         super().__init__(title)
@@ -748,6 +792,7 @@ class StrategyEvaluationTable(QGroupBox):
         self.table.setRowCount(0)
         for record in records:
             self._append_row(record, include_strategy)
+        _restore_table_sort(self.table)
         if scroll_to_bottom:
             self.table.scrollToBottom()
         elif preserve_scroll:
@@ -772,19 +817,20 @@ class StrategyEvaluationTable(QGroupBox):
         row = self.table.rowCount()
         self.table.insertRow(row)
         evaluation = record.evaluation
-        values = [
-            _format_table_timestamp(record.timestamp),
-            f"{evaluation.value:.8f}",
-            f"{evaluation.threshold:.8f}",
-            ", ".join(evaluation.symbols),
-            evaluation.message,
+        formatted_timestamp = _format_table_timestamp(record.timestamp)
+        values: list[tuple[str, object | None]] = [
+            (formatted_timestamp, formatted_timestamp),
+            (f"{evaluation.value:.8f}", evaluation.value),
+            (f"{evaluation.threshold:.8f}", evaluation.threshold),
+            (", ".join(evaluation.symbols), None),
+            (evaluation.message, None),
         ]
         numeric_columns = (1, 2)
         if include_strategy:
-            values.insert(1, evaluation.strategy_name)
+            values.insert(1, (evaluation.strategy_name, evaluation.strategy_name.casefold()))
             numeric_columns = (2, 3)
-        for column, value in enumerate(values):
-            item = QTableWidgetItem(value)
+        for column, (value, sort_key) in enumerate(values):
+            item = _table_item(value, sort_key=sort_key)
             if column in numeric_columns:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, column, item)
@@ -877,6 +923,7 @@ class ConfigEditor(QWidget):
         self.strategies.verticalHeader().setMinimumSectionSize(32)
         self.strategies.verticalHeader().setVisible(False)
         _configure_resizable_columns(self.strategies, (70, 130, 110, 180))
+        self.strategies.itemChanged.connect(self._on_strategy_item_changed)
         layout.addWidget(self.strategies)
         self.content_layout.addWidget(box)
 
@@ -973,7 +1020,14 @@ class ConfigEditor(QWidget):
         self.min_open_interest.setValue(config.universe.min_open_interest)
         self.strategies.setRowCount(0)
         for strategy in config.strategies:
-            self._add_strategy_row(strategy.type, strategy.threshold, strategy.name or "", strategy.selected)
+            self._add_strategy_row(
+                strategy.type,
+                strategy.threshold,
+                strategy.name or "",
+                strategy.selected,
+                restore_sort=False,
+            )
+        _restore_table_sort(self.strategies)
         if config.backtest.start_dt is not None:
             self.backtest_start.setText(config.backtest.start_dt.isoformat())
         else:
@@ -1089,10 +1143,17 @@ class ConfigEditor(QWidget):
             rows.append(item)
         return rows
 
-    def _add_strategy_row(self, strategy_type: str, threshold: float, name: str, selected: bool = True) -> None:
+    def _add_strategy_row(
+        self,
+        strategy_type: str,
+        threshold: float,
+        name: str,
+        selected: bool = True,
+        restore_sort: bool = True,
+    ) -> None:
         row = self.strategies.rowCount()
         self.strategies.insertRow(row)
-        selected_item = QTableWidgetItem()
+        selected_item = _table_item("", sort_key=1 if selected else 0)
         selected_item.setFlags(
             Qt.ItemFlag.ItemIsUserCheckable
             | Qt.ItemFlag.ItemIsEnabled
@@ -1101,14 +1162,30 @@ class ConfigEditor(QWidget):
         selected_item.setCheckState(Qt.CheckState.Checked if selected else Qt.CheckState.Unchecked)
         selected_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.strategies.setItem(row, 0, selected_item)
-        self.strategies.setItem(row, 1, QTableWidgetItem(strategy_type))
-        self.strategies.setItem(row, 2, QTableWidgetItem(str(threshold)))
-        self.strategies.setItem(row, 3, QTableWidgetItem(name))
+        self.strategies.setItem(row, 1, _table_item(strategy_type, sort_key=strategy_type.casefold()))
+        self.strategies.setItem(row, 2, _table_item(str(threshold), sort_key=threshold))
+        self.strategies.setItem(row, 3, _table_item(name, sort_key=name.casefold()))
+        if restore_sort:
+            _restore_table_sort(self.strategies)
 
     def _remove_strategy_row(self) -> None:
         row = self.strategies.currentRow()
         if row >= 0:
             self.strategies.removeRow(row)
+
+    def _on_strategy_item_changed(self, item: QTableWidgetItem) -> None:
+        sort_key: object | None
+        if item.column() == 0:
+            sort_key = 1 if item.checkState() == Qt.CheckState.Checked else 0
+        elif item.column() == 2:
+            try:
+                sort_key = float(item.text().strip())
+            except ValueError:
+                sort_key = item.text().casefold()
+        else:
+            sort_key = item.text().casefold()
+        if item.data(SORT_ROLE) != sort_key:
+            item.setData(SORT_ROLE, sort_key)
 
 
 def _unique_names(names: Iterable[str]) -> tuple[str, ...]:
@@ -1124,11 +1201,75 @@ def _unique_names(names: Iterable[str]) -> tuple[str, ...]:
 
 
 def _configure_resizable_columns(table: QTableWidget, widths: tuple[int, ...]) -> None:
-    header = table.horizontalHeader()
+    header = _ensure_sortable_header(table)
     header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
     header.setMinimumSectionSize(50)
+    header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     for column, width in enumerate(widths):
         table.setColumnWidth(column, width)
+
+
+def _ensure_sortable_header(table: QTableWidget) -> SortableHeader:
+    header = table.horizontalHeader()
+    if not isinstance(header, SortableHeader):
+        header = SortableHeader(Qt.Orientation.Horizontal, table)
+        table.setHorizontalHeader(header)
+    if not getattr(table, "_kuaiqi_sort_connected", False):
+        header.sectionClicked.connect(lambda column, current_table=table: _toggle_table_sort(current_table, column))
+        setattr(table, "_kuaiqi_sort_connected", True)
+    table.setSortingEnabled(False)
+    return header
+
+
+def _toggle_table_sort(table: QTableWidget, column: int) -> None:
+    previous_label = table.property(SORT_LABEL_PROPERTY)
+    previous_order = _sort_order_from_property(table.property(SORT_ORDER_PROPERTY))
+    label = _header_label(table, column)
+    order = Qt.SortOrder.AscendingOrder
+    if previous_label == label and previous_order == Qt.SortOrder.AscendingOrder:
+        order = Qt.SortOrder.DescendingOrder
+    _apply_table_sort(table, column, order)
+
+
+def _restore_table_sort(table: QTableWidget) -> None:
+    label = table.property(SORT_LABEL_PROPERTY)
+    if not label:
+        header = table.horizontalHeader()
+        if isinstance(header, SortableHeader):
+            header.set_sort_state(None, Qt.SortOrder.AscendingOrder)
+        return
+    column = _column_for_header_label(table, str(label))
+    if column is None:
+        return
+    _apply_table_sort(table, column, _sort_order_from_property(table.property(SORT_ORDER_PROPERTY)))
+
+
+def _apply_table_sort(table: QTableWidget, column: int, order: Qt.SortOrder) -> None:
+    table.setProperty(SORT_COLUMN_PROPERTY, column)
+    table.setProperty(SORT_LABEL_PROPERTY, _header_label(table, column))
+    table.setProperty(SORT_ORDER_PROPERTY, order.value)
+    header = table.horizontalHeader()
+    if isinstance(header, SortableHeader):
+        header.set_sort_state(column, order)
+    table.sortItems(column, order)
+
+
+def _sort_order_from_property(value: object) -> Qt.SortOrder:
+    if value == Qt.SortOrder.DescendingOrder.value:
+        return Qt.SortOrder.DescendingOrder
+    return Qt.SortOrder.AscendingOrder
+
+
+def _column_for_header_label(table: QTableWidget, label: str) -> int | None:
+    for column in range(table.columnCount()):
+        if _header_label(table, column) == label:
+            return column
+    return None
+
+
+def _header_label(table: QTableWidget, column: int) -> str:
+    item = table.horizontalHeaderItem(column)
+    return item.text() if item is not None else str(column)
 
 
 def _table_is_at_bottom(table: QTableWidget) -> bool:
@@ -1178,6 +1319,13 @@ def _split_lines(value: str) -> list[str]:
         if item:
             result.append(item)
     return result
+
+
+def _table_item(text: str, sort_key: object | None = None) -> SortableTableWidgetItem:
+    item = SortableTableWidgetItem(str(text))
+    if sort_key is not None:
+        item.setData(SORT_ROLE, sort_key)
+    return item
 
 
 def _table_text(table: QTableWidget, row: int, column: int) -> str:
@@ -1298,7 +1446,7 @@ def _apply_style(app: QApplication) -> None:
             background: #eef2f5;
             border: 0;
             border-right: 1px solid #d8dee4;
-            padding: 6px;
+            padding: 6px 28px 6px 6px;
             font-weight: 600;
         }
         QLabel#windowTitle {
