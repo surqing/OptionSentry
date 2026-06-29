@@ -292,7 +292,7 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
             strike=f"K={strike}" if strike else "-",
             value=value,
             threshold=threshold,
-            trigger_condition=f"|偏离率| > {threshold}",
+            trigger_condition=_threshold_condition("偏离率", "大于", threshold),
             symbols=", ".join(evaluation.symbols),
         )
     if evaluation.strategy_name == "abs_spread" and parsed:
@@ -309,7 +309,7 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
             strike=f"{first_strike} / {second_strike}" if first_strike and second_strike else "-",
             value=value,
             threshold=threshold,
-            trigger_condition=f"价差比例 < {threshold}",
+            trigger_condition=_threshold_condition("价差比例", "小于", threshold),
             symbols=", ".join(evaluation.symbols),
         )
     return _EmailAlertRow(
@@ -320,7 +320,7 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
         strike="-",
         value=_format_number(evaluation.value),
         threshold=_format_number(evaluation.threshold),
-        trigger_condition=f"阈值 {_format_number(evaluation.threshold)}",
+        trigger_condition=_generic_threshold_condition(evaluation.value, evaluation.threshold),
         symbols=", ".join(evaluation.symbols),
     )
 
@@ -338,6 +338,20 @@ def _email_table_row(index: int, row: _EmailAlertRow) -> str:
             <td style="{_TD_STYLE};white-space:nowrap;">{escape(row.trigger_condition)}</td>
             <td style="{_TD_STYLE};word-break:break-all;">{escape(row.symbols)}</td>
           </tr>"""
+
+
+def _threshold_condition(metric_label: str, relation: str, threshold: str) -> str:
+    return f"{metric_label}{relation}阈值（{threshold}）"
+
+
+def _generic_threshold_condition(value: float, threshold: float) -> str:
+    if value > threshold:
+        relation = "大于"
+    elif value < threshold:
+        relation = "小于"
+    else:
+        relation = "等于"
+    return _threshold_condition("当前指标值", relation, _format_number(threshold))
 
 
 def _strategy_label(strategy_name: str) -> str:

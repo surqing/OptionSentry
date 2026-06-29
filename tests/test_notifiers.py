@@ -87,7 +87,9 @@ class NotifierTests(unittest.TestCase):
         self.assertIn("价差预警", html_body)
         self.assertIn("认购 + 认沽 + 标的", html_body)
         self.assertIn("认沽", html_body)
-        self.assertIn("价差比例 &lt; 0.1", html_body)
+        self.assertIn("偏离率大于阈值（0.01）", plain_body)
+        self.assertIn("价差比例小于阈值（0.1）", plain_body)
+        self.assertIn("价差比例小于阈值（0.1）", html_body)
 
     def test_email_failure_enters_backoff_and_recorder_keeps_writing(self) -> None:
         event = _event()

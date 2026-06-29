@@ -119,7 +119,7 @@ class _CompiledCPComboStrategy(CompiledStrategy):
             if not (_valid_price(call_price) and _valid_price(put_price)):
                 continue
             deviation = call_price - put_price + condition.strike - future_price
-            value = deviation / future_price
+            value = abs(deviation / future_price)
             active = abs(deviation) > self.threshold * future_price
             symbols = (condition.call_symbol, condition.put_symbol, condition.underlying_symbol)
             evaluations.append(
