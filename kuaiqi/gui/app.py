@@ -328,6 +328,9 @@ class MainWindow(QMainWindow):
 
     def _load_config_into_editor(self, config: AppConfig) -> None:
         self.config_editor.set_config(config)
+        self._sync_config_summary(config)
+
+    def _sync_config_summary(self, config: AppConfig) -> None:
         self._set_status("mode", config.runtime.mode)
         self._set_status("config_path", str(self.config_path))
         self._set_status("credential_source", self.credentials.source)
@@ -342,7 +345,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.warning(self, "配置错误", str(exc))
             return
-        self._set_strategy_filters(self.config)
+        self._sync_config_summary(self.config)
         self.alert_view.clear_records()
         self.active_view.clear_records()
         self._append_log("Starting monitor")
@@ -421,7 +424,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "保存失败", str(exc))
             return
         self.config = config
-        self._set_strategy_filters(config)
+        self._sync_config_summary(config)
         suffix = "；当前监控继续使用启动时的配置" if self._running else ""
         self._append_log(f"Saved config: {self.config_path}{suffix}")
 

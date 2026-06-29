@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -200,6 +201,53 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertTrue(event.ignored)
         main_window.close()
         window.close()
+
+    def test_save_config_updates_monitor_config_status(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import QApplication
+
+        from kuaiqi.config import load_config, parse_config
+        from kuaiqi.gui.app import MainWindow
+        from kuaiqi.gui.credentials import CredentialResolution
+
+        app = QApplication.instance() or QApplication([])
+        config = parse_config(
+            {
+                "strategies": [
+                    {"type": "cp_combo", "threshold": 0.01},
+                    {"type": "abs_spread", "threshold": 0.1, "selected": False},
+                ]
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            main_window = MainWindow(
+                config_path,
+                config,
+                CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
+            )
+
+            main_window.config_editor.runtime_mode.setCurrentText("backtest")
+            main_window.config_editor.backtest_start.setText("2026-06-01")
+            main_window.config_editor.backtest_end.setText("2026-06-02")
+            main_window.config_editor.strategies.item(1, 0).setCheckState(Qt.CheckState.Checked)
+            main_window._save_config()
+            app.processEvents()
+
+            self.assertEqual(main_window.config.runtime.mode, "backtest")
+            self.assertEqual(load_config(config_path).runtime.mode, "backtest")
+            self.assertEqual(main_window.status_labels["mode"].text(), "backtest")
+            self.assertEqual(main_window.status_labels["strategies"].text(), "2")
+            self.assertEqual(
+                main_window.active_view.filter_labels(),
+                ("全部策略", "cp_combo", "abs_spread"),
+            )
+            self.assertEqual(
+                main_window.alert_view.filter_labels(),
+                ("全部策略", "cp_combo", "abs_spread"),
+            )
+            main_window.close()
 
 
 def _alert_event(timestamp: str, strategy_name: str = "cp_combo") -> AlertEvent:
