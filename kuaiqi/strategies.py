@@ -132,7 +132,7 @@ class _CompiledCPComboStrategy(CompiledStrategy):
                     symbols=symbols,
                     message=(
                         f"{self.name} {condition.group_text} K={_format_float(condition.strike)} "
-                        f"value={value:+.8f} threshold={self.threshold:.8f} "
+                        f"value={value:.8f} threshold={self.threshold:.8f} "
                         f"symbols={','.join(symbols)}"
                     ),
                 )

@@ -820,7 +820,7 @@ class StrategyEvaluationTable(QGroupBox):
         formatted_timestamp = _format_table_timestamp(record.timestamp)
         values: list[tuple[str, object | None]] = [
             (formatted_timestamp, formatted_timestamp),
-            (_format_evaluation_value(evaluation), evaluation.value),
+            (f"{evaluation.value:.8f}", evaluation.value),
             (f"{evaluation.threshold:.8f}", evaluation.threshold),
             (", ".join(evaluation.symbols), None),
             (evaluation.message, None),
@@ -1289,12 +1289,6 @@ def _format_table_timestamp(timestamp: str) -> str:
     if len(value) >= 19 and value[10] in (" ", "T") and value[13] == ":" and value[16] == ":":
         return value[:19].replace("T", " ")
     return value
-
-
-def _format_evaluation_value(evaluation: ConditionEvaluation) -> str:
-    if evaluation.strategy_name == "cp_combo":
-        return f"{evaluation.value:+.8f}"
-    return f"{evaluation.value:.8f}"
 
 
 def _format_status_timestamp(timestamp: str) -> str:
