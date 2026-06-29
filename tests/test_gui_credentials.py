@@ -37,6 +37,31 @@ class GuiCredentialTests(unittest.TestCase):
         self.assertEqual(credentials.password, "secret")
         self.assertEqual(credentials.source, "environment")
 
+    def test_blank_login_prefers_remembered_config_credentials(self) -> None:
+        config = parse_config(
+            {
+                "datasource": {
+                    "tqsdk": {
+                        "username": "remembered-user",
+                        "password": "remembered-secret",
+                        "username_env": "USER_ENV",
+                        "password_env": "PASS_ENV",
+                    }
+                },
+                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+            }
+        )
+        environ = {"USER_ENV": "env-user", "PASS_ENV": "env-secret"}
+
+        credentials = resolve_tqsdk_credentials(config, "", "", environ=environ)
+        apply_session_credentials(credentials, environ=environ)
+
+        self.assertEqual(credentials.username, "remembered-user")
+        self.assertEqual(credentials.password, "remembered-secret")
+        self.assertEqual(credentials.source, "config")
+        self.assertEqual(environ["USER_ENV"], "remembered-user")
+        self.assertEqual(environ["PASS_ENV"], "remembered-secret")
+
     def test_filled_login_uses_session_credentials_without_persisting_names(self) -> None:
         config = parse_config(
             {
@@ -65,6 +90,15 @@ class GuiCredentialTests(unittest.TestCase):
 
         with self.assertRaises(ConfigError):
             resolve_tqsdk_credentials(config, "alice", "")
+
+    def test_partially_remembered_config_credentials_fail(self) -> None:
+        with self.assertRaises(ConfigError):
+            parse_config(
+                {
+                    "datasource": {"tqsdk": {"username": "alice"}},
+                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                }
+            )
 
     def test_load_and_validate_login_does_not_write_credentials_to_config(self) -> None:
         calls: list[tuple[str, str]] = []

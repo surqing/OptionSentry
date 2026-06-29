@@ -18,10 +18,12 @@ class GuiSmokeTests(unittest.TestCase):
         from kuaiqi.gui.app import (
             APP_ICON_PATH,
             APP_NAME,
+            TOAST_DURATION_MS,
             LoginWindow,
             MainWindow,
             _apply_style,
             _double_spin,
+            _friendly_login_error,
             _format_status_timestamp,
             _format_table_timestamp,
             _spin,
@@ -33,6 +35,26 @@ class GuiSmokeTests(unittest.TestCase):
         app = QApplication.instance() or QApplication([])
         _apply_style(app)
         window = LoginWindow()
+        window.show()
+        self.assertTrue(window.login_button.isDefault())
+        self.assertEqual(window.remember_me.text(), "记住我")
+        window._show_login_error("ConfigError: TqSdk username and password must be both filled or both empty.")
+        app.processEvents()
+        self.assertEqual(window.error_label.text(), "账号和密码需要同时填写；如果都留空，将读取已记住的账号或环境变量。")
+        self.assertEqual(window._toast._duration_ms, TOAST_DURATION_MS)
+        self.assertEqual(window._toast._label.text(), window.error_label.text())
+        self.assertTrue(bool(window._toast.windowFlags() & Qt.WindowType.FramelessWindowHint))
+        self.assertIsNotNone(window._toast.graphicsEffect())
+        self.assertEqual(
+            _friendly_login_error("Exception: 用户权限认证失败 (401,{'error': 'invalid_grant'})"),
+            "TqSdk 登录失败，请检查账号和密码。",
+        )
+        window.username.setText("alice")
+        window.password.clear()
+        window.username.returnPressed.emit()
+        app.processEvents()
+        self.assertEqual(window.error_label.text(), "账号和密码需要同时填写；如果都留空，将读取已记住的账号或环境变量。")
+        window.username.clear()
         config = parse_config(
             {
                 "strategies": [
@@ -201,6 +223,56 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertTrue(event.ignored)
         main_window.close()
         window.close()
+
+    def test_login_success_remembers_credentials_and_shows_toast(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtWidgets import QApplication
+
+        from kuaiqi.config import load_config, parse_config
+        from kuaiqi.gui.app import LoginWindow, _apply_style
+        from kuaiqi.gui.credentials import CredentialResolution
+
+        app = QApplication.instance() or QApplication([])
+        _apply_style(app)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            config_path.write_text(
+                "[[strategies]]\n"
+                'type = "cp_combo"\n'
+                "threshold = 0.01\n",
+                encoding="utf-8",
+            )
+            config = parse_config({"strategies": [{"type": "cp_combo", "threshold": 0.01}]})
+            window = LoginWindow()
+            window.config_path.setText(str(config_path))
+            window.username.setText("alice")
+            window.password.setText("secret")
+            window.remember_me.setChecked(True)
+
+            window._on_login_success(
+                config_path,
+                config,
+                CredentialResolution("alice", "secret", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
+            )
+            app.processEvents()
+
+            saved = load_config(config_path)
+            self.assertEqual(saved.tqsdk.username, "alice")
+            self.assertEqual(saved.tqsdk.password, "secret")
+            self.assertIsNotNone(window._main_window)
+            self.assertEqual(window._main_window._toast._label.text(), "登录成功")
+            self.assertEqual(window._main_window.config_editor.build_config().tqsdk.username, "alice")
+            self.assertEqual(window._main_window.config_editor.build_config().tqsdk.password, "secret")
+
+            next_window = LoginWindow()
+            next_window.config_path.setText(str(config_path))
+            next_window._fill_remembered_credentials()
+            self.assertEqual(next_window.username.text(), "alice")
+            self.assertEqual(next_window.password.text(), "secret")
+            self.assertTrue(next_window.remember_me.isChecked())
+
+            window._main_window.close()
+            next_window.close()
 
     def test_save_config_updates_monitor_config_status(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

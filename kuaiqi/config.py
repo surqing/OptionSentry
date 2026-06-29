@@ -41,6 +41,8 @@ class BacktestConfig:
 
 @dataclass(frozen=True)
 class TqSdkConfig:
+    username: str | None = None
+    password: str | None = None
     username_env: str = "TQSDK_USERNAME"
     password_env: str = "TQSDK_PASSWORD"
     symbol_info_batch_size: int = 500
@@ -165,11 +167,17 @@ def _parse_backtest(data: dict[str, Any]) -> BacktestConfig:
 def _parse_tqsdk(data: dict[str, Any]) -> TqSdkConfig:
     symbol_info_batch_size = int(data.get("symbol_info_batch_size", 500))
     quote_subscription_batch_size = int(data.get("quote_subscription_batch_size", 500))
+    username = _optional_str(data.get("username"))
+    password = _optional_str(data.get("password"))
+    if bool(username) != bool(password):
+        raise ConfigError("datasource.tqsdk.username and password must be both set or both omitted.")
     if symbol_info_batch_size <= 0:
         raise ConfigError("datasource.tqsdk.symbol_info_batch_size must be positive.")
     if quote_subscription_batch_size <= 0:
         raise ConfigError("datasource.tqsdk.quote_subscription_batch_size must be positive.")
     return TqSdkConfig(
+        username=username,
+        password=password,
         username_env=str(data.get("username_env", "TQSDK_USERNAME")),
         password_env=str(data.get("password_env", "TQSDK_PASSWORD")),
         symbol_info_batch_size=symbol_info_batch_size,
@@ -287,6 +295,13 @@ def _optional_int(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _optional_date(value: Any) -> date | None:

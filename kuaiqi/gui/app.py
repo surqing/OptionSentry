@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QObject, QPropertyAnimation, QTimer, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFormLayout,
+    QGraphicsOpacityEffect,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -48,6 +49,8 @@ from kuaiqi.runner import RunnerCycle
 APP_NAME = "期权预警系统"
 APP_ICON_PATH = Path(__file__).with_name("assets") / "app_icon.svg"
 ALL_STRATEGIES_LABEL = "全部策略"
+TOAST_DURATION_MS = 1500
+TOAST_FADE_MS = 150
 
 
 def app_icon() -> QIcon:
@@ -75,6 +78,132 @@ class LoginWorker(QObject):
             self.failed.emit(f"{type(exc).__name__}: {exc}")
             return
         self.finished.emit(self.config_path, config, credentials)
+
+
+class ToastPopup(QWidget):
+    def __init__(self, parent: QWidget, duration_ms: int = TOAST_DURATION_MS) -> None:
+        super().__init__(
+            parent,
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.ToolTip
+            | Qt.WindowType.WindowStaysOnTopHint,
+        )
+        self._duration_ms = duration_ms
+        self._fade_ms = min(TOAST_FADE_MS, max(duration_ms // 2, 0))
+        self._sequence = 0
+        self.setObjectName("toastPopup")
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self._label = QLabel("")
+        self._label.setObjectName("toastLabel")
+        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._label.setWordWrap(True)
+        self._label.setMinimumWidth(260)
+        self._label.setMaximumWidth(440)
+        layout.addWidget(self._label)
+
+        self._opacity = QGraphicsOpacityEffect(self)
+        self._opacity.setOpacity(0.0)
+        self.setGraphicsEffect(self._opacity)
+
+        self._fade_in = QPropertyAnimation(self._opacity, b"opacity", self)
+        self._fade_in.setDuration(self._fade_ms)
+        self._fade_in.setStartValue(0.0)
+        self._fade_in.setEndValue(1.0)
+        self._fade_in.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self._fade_out = QPropertyAnimation(self._opacity, b"opacity", self)
+        self._fade_out.setDuration(self._fade_ms)
+        self._fade_out.setStartValue(1.0)
+        self._fade_out.setEndValue(0.0)
+        self._fade_out.setEasingCurve(QEasingCurve.Type.InCubic)
+        self._fade_out.finished.connect(self.hide)
+
+    def show_message(self, message: str) -> None:
+        self._sequence += 1
+        sequence = self._sequence
+        self._fade_in.stop()
+        self._fade_out.stop()
+        try:
+            self._fade_in.finished.disconnect()
+        except TypeError:
+            pass
+        self._label.setText(message)
+        self.adjustSize()
+        self._move_near_parent()
+        self._opacity.setOpacity(0.0)
+        self.show()
+        self.raise_()
+        self._fade_in.finished.connect(lambda sequence=sequence: self._hold_then_fade(sequence))
+        self._fade_in.start()
+
+    def _hold_then_fade(self, sequence: int) -> None:
+        try:
+            self._fade_in.finished.disconnect()
+        except TypeError:
+            pass
+        hold_ms = max(0, self._duration_ms - (self._fade_ms * 2))
+        QTimer.singleShot(hold_ms, lambda: self._fade_out_if_current(sequence))
+
+    def _fade_out_if_current(self, sequence: int) -> None:
+        if sequence != self._sequence:
+            return
+        self._fade_out.start()
+
+    def _move_near_parent(self) -> None:
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        parent_top_left = parent.mapToGlobal(parent.rect().topLeft())
+        x = parent_top_left.x() + max(12, (parent.width() - self.width()) // 2)
+        y = parent_top_left.y() + min(88, max(24, parent.height() // 5))
+        self.move(x, y)
+
+
+def _friendly_login_error(message: str) -> str:
+    detail = _strip_exception_name(message)
+    lowered = detail.lower()
+    if "username and password must be both filled or both empty" in lowered:
+        return "账号和密码需要同时填写；如果都留空，将读取已记住的账号或环境变量。"
+    if detail.startswith("TqSdk auth requires "):
+        env_names = detail.removeprefix("TqSdk auth requires ").rstrip(".")
+        env_names = env_names.replace(" and ", " / ")
+        return f"请输入 TqSdk 账号和密码，或设置已记住的账号/环境变量 {env_names}。"
+    if "不能为空" in detail:
+        return "请输入 TqSdk 账号和密码。"
+    if "用户权限认证失败" in detail or "认证失败" in detail:
+        return "TqSdk 登录失败，请检查账号和密码。"
+    if "auth" in lowered and ("password" in lowered or "username" in lowered):
+        return "TqSdk 登录失败，请检查账号和密码。"
+    return detail or "登录失败，请检查账号和密码。"
+
+
+def _strip_exception_name(message: str) -> str:
+    prefix, separator, suffix = message.strip().partition(": ")
+    if separator and (prefix == "Exception" or prefix.endswith("Error")):
+        return suffix.strip()
+    return message.strip()
+
+
+def _remember_tqsdk_credentials(
+    config_path: Path,
+    config: AppConfig,
+    credentials: CredentialResolution,
+) -> AppConfig:
+    remembered = replace(
+        config,
+        tqsdk=replace(
+            config.tqsdk,
+            username=credentials.username,
+            password=credentials.password,
+        ),
+    )
+    save_config(config_path, remembered)
+    return remembered
 
 
 class MonitorWorker(QObject):
@@ -135,6 +264,7 @@ class LoginWindow(QWidget):
         self._worker: LoginWorker | None = None
         self._main_window: MainWindow | None = None
         self._build_ui()
+        self._toast = ToastPopup(self)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -159,10 +289,13 @@ class LoginWindow(QWidget):
         form.addRow("配置文件", config_row)
 
         self.username = QLineEdit()
-        self.username.setPlaceholderText("留空则读取 username_env")
+        self.username.setPlaceholderText("留空则读取配置或 username_env")
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password.setPlaceholderText("留空则读取 password_env")
+        self.password.setPlaceholderText("留空则读取配置或 password_env")
+        self.username.returnPressed.connect(self._submit_login)
+        self.password.returnPressed.connect(self._submit_login)
+        self.config_path.returnPressed.connect(self._submit_login)
         form.addRow("账号", self.username)
         form.addRow("密码", self.password)
         layout.addWidget(form_box)
@@ -176,22 +309,37 @@ class LoginWindow(QWidget):
         row.addStretch(1)
         self.login_button = QPushButton("登录")
         self.login_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton))
+        self.login_button.setDefault(True)
+        self.login_button.setAutoDefault(True)
         self.login_button.clicked.connect(self._login)
+        self.remember_me = QCheckBox("记住我")
+        row.addWidget(self.remember_me)
         row.addWidget(self.login_button)
         layout.addLayout(row)
+        self._fill_remembered_credentials()
 
     def _browse_config(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "选择配置文件", ".", "TOML (*.toml);;All Files (*)")
         if path:
             self.config_path.setText(path)
+            self._fill_remembered_credentials()
+
+    def _submit_login(self) -> None:
+        if self.login_button.isEnabled():
+            self._login()
 
     def _login(self) -> None:
         self.error_label.setText("")
+        username = self.username.text()
+        password = self.password.text()
+        if bool(username.strip()) != bool(password.strip()):
+            self._show_login_error("ConfigError: TqSdk username and password must be both filled or both empty.")
+            return
         path = Path(self.config_path.text().strip() or "config.toml")
         self.login_button.setEnabled(False)
         self.login_button.setText("登录中")
         self._thread = QThread(self)
-        self._worker = LoginWorker(path, self.username.text(), self.password.text())
+        self._worker = LoginWorker(path, username, password)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._on_login_success)
@@ -210,14 +358,36 @@ class LoginWindow(QWidget):
     ) -> None:
         self.login_button.setEnabled(True)
         self.login_button.setText("登录")
+        if self.remember_me.isChecked():
+            try:
+                config = _remember_tqsdk_credentials(config_path, config, credentials)
+            except Exception as exc:
+                self._show_login_error(f"保存账号密码失败: {exc}")
+                return
         self._main_window = MainWindow(config_path, config, credentials)
         self._main_window.show()
+        self._main_window.show_toast("登录成功")
         self.close()
 
     def _on_login_failed(self, message: str) -> None:
         self.login_button.setEnabled(True)
         self.login_button.setText("登录")
-        self.error_label.setText(message)
+        self._show_login_error(message)
+
+    def _show_login_error(self, message: str) -> None:
+        friendly_message = _friendly_login_error(message)
+        self.error_label.setText(friendly_message)
+        self._toast.show_message(friendly_message)
+
+    def _fill_remembered_credentials(self) -> None:
+        try:
+            config = load_config(Path(self.config_path.text().strip() or "config.toml"))
+        except Exception:
+            return
+        if config.tqsdk.username and config.tqsdk.password:
+            self.username.setText(config.tqsdk.username)
+            self.password.setText(config.tqsdk.password)
+            self.remember_me.setChecked(True)
 
 
 class MainWindow(QMainWindow):
@@ -238,6 +408,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(app_icon())
         self.resize(1180, 760)
         self._build_ui()
+        self._toast = ToastPopup(self)
         self._load_config_into_editor(config)
         self._set_running(False)
 
@@ -272,6 +443,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         self.save_action = self.config_editor.save_button
         self.reload_action = self.config_editor.reload_button
+
+    def show_toast(self, message: str) -> None:
+        self._toast.show_message(message)
 
     def _monitor_tab(self) -> QWidget:
         tab = QWidget()
@@ -617,6 +791,8 @@ class StrategyEvaluationTable(QGroupBox):
 class ConfigEditor(QWidget):
     def __init__(self) -> None:
         super().__init__()
+        self._tqsdk_username: str | None = None
+        self._tqsdk_password: str | None = None
         outer = QVBoxLayout(self)
         actions = QHBoxLayout()
         self.save_button = QPushButton("保存配置")
@@ -808,6 +984,8 @@ class ConfigEditor(QWidget):
         self.data_length.setValue(config.backtest.data_length)
         self.initial_price_timeout_seconds.setValue(config.backtest.initial_price_timeout_seconds)
         self.subscription_batch_size.setValue(config.backtest.subscription_batch_size)
+        self._tqsdk_username = config.tqsdk.username
+        self._tqsdk_password = config.tqsdk.password
         self.username_env.setText(config.tqsdk.username_env)
         self.password_env.setText(config.tqsdk.password_env)
         self.symbol_info_batch_size.setValue(config.tqsdk.symbol_info_batch_size)
@@ -852,6 +1030,8 @@ class ConfigEditor(QWidget):
             },
             "datasource": {
                 "tqsdk": {
+                    "username": self._tqsdk_username,
+                    "password": self._tqsdk_password,
                     "username_env": self.username_env.text().strip() or "TQSDK_USERNAME",
                     "password_env": self.password_env.text().strip() or "TQSDK_PASSWORD",
                     "symbol_info_batch_size": self.symbol_info_batch_size.value(),
@@ -1128,6 +1308,16 @@ def _apply_style(app: QApplication) -> None:
         }
         QLabel#error {
             color: #b42318;
+        }
+        QWidget#toastPopup {
+            background: transparent;
+        }
+        QLabel#toastLabel {
+            background: rgba(36, 41, 47, 230);
+            color: #ffffff;
+            border-radius: 6px;
+            padding: 12px 16px;
+            font-weight: 600;
         }
         QLabel#statusValue {
             font-weight: 600;
