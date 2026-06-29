@@ -601,6 +601,7 @@ class MainWindow(QMainWindow):
         self._sync_config_summary(config)
         suffix = "；当前监控继续使用启动时的配置" if self._running else ""
         self._append_log(f"Saved config: {self.config_path}{suffix}")
+        self.show_toast("保存成功")
 
     def _reload_config(self) -> None:
         try:
@@ -612,6 +613,7 @@ class MainWindow(QMainWindow):
         self._load_config_into_editor(config)
         suffix = "；当前监控继续使用启动时的配置" if self._running else ""
         self._append_log(f"Reloaded config: {self.config_path}{suffix}")
+        self.show_toast("加载成功")
 
     def _set_running(self, running: bool) -> None:
         self._running = running

@@ -307,6 +307,7 @@ class GuiSmokeTests(unittest.TestCase):
             main_window._save_config()
             app.processEvents()
 
+            self.assertEqual(main_window._toast._label.text(), "保存成功")
             self.assertEqual(main_window.config.runtime.mode, "backtest")
             self.assertEqual(load_config(config_path).runtime.mode, "backtest")
             self.assertEqual(main_window.status_labels["mode"].text(), "backtest")
@@ -319,6 +320,25 @@ class GuiSmokeTests(unittest.TestCase):
                 main_window.alert_view.filter_labels(),
                 ("全部策略", "cp_combo", "abs_spread"),
             )
+
+            config_path.write_text(
+                "[runtime]\n"
+                'mode = "live"\n'
+                'price_basis = "last"\n\n'
+                "[[strategies]]\n"
+                'type = "cp_combo"\n'
+                "threshold = 0.01\n",
+                encoding="utf-8",
+            )
+            main_window._reload_config()
+            app.processEvents()
+
+            self.assertEqual(main_window._toast._label.text(), "加载成功")
+            self.assertEqual(main_window.config.runtime.mode, "live")
+            self.assertEqual(main_window.status_labels["mode"].text(), "live")
+            self.assertEqual(main_window.status_labels["strategies"].text(), "1")
+            self.assertEqual(main_window.active_view.filter_labels(), ("全部策略", "cp_combo"))
+            self.assertEqual(main_window.alert_view.filter_labels(), ("全部策略", "cp_combo"))
             main_window.close()
 
 
