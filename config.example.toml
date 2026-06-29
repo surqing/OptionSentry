@@ -70,3 +70,7 @@ backup_count = 5
 # INFO cycle summaries are throttled; per-cycle details are available at DEBUG.
 # Set to 0 to log every cycle.
 cycle_summary_interval_seconds = 60
+
+[gui.active_alerts]
+auto_refresh = true
+refresh_interval_seconds = 10

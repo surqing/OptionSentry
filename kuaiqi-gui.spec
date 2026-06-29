@@ -1,5 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+import shutil
+
 
 a = Analysis(
     ["kuaiqi_gui.py"],
@@ -45,4 +48,9 @@ coll = COLLECT(
     upx=True,
     upx_exclude=[],
     name="kuaiqi-gui",
+)
+
+shutil.copyfile(
+    Path("config.example.toml"),
+    Path(coll.name) / "config.example.toml",
 )

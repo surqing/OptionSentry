@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from kuaiqi.config import ConfigError, parse_config
+from kuaiqi.config import ConfigError, load_config, parse_config
 from kuaiqi.models import InstrumentMeta, Universe
 from kuaiqi.data_sources.tqsdk_source import TqSdkDataSource, _row_to_meta
 from tests.helpers import sample_universe
@@ -143,6 +144,12 @@ class UniverseTests(unittest.TestCase):
 
         self.assertFalse(config.gui.active_alerts.auto_refresh)
         self.assertEqual(config.gui.active_alerts.refresh_interval_seconds, 180)
+
+    def test_example_config_parses_with_gui_defaults(self) -> None:
+        config = load_config(Path(__file__).resolve().parents[1] / "config.example.toml")
+
+        self.assertTrue(config.gui.active_alerts.auto_refresh)
+        self.assertEqual(config.gui.active_alerts.refresh_interval_seconds, 10)
 
     def test_live_universe_filters_liquidity_from_metadata(self) -> None:
         api = _FakeDiscoveryApi(_liquidity_rows(include_metrics=True))
