@@ -296,7 +296,7 @@ class LoginWindow(QWidget):
 
         form_box = QGroupBox("登录")
         form = QFormLayout(form_box)
-        self.config_path = QLineEdit(str(Path("config.toml")))
+        self.config_path = QLineEdit(str(_default_config_path()))
         browse = QToolButton()
         browse.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
         browse.setToolTip("选择配置文件")
@@ -353,7 +353,7 @@ class LoginWindow(QWidget):
         if bool(username.strip()) != bool(password.strip()):
             self._show_login_error("ConfigError: TqSdk username and password must be both filled or both empty.")
             return
-        path = Path(self.config_path.text().strip() or "config.toml")
+        path = Path(self.config_path.text().strip() or _default_config_path())
         self.login_button.setEnabled(False)
         self.login_button.setText("登录中")
         self._thread = QThread(self)
@@ -399,7 +399,7 @@ class LoginWindow(QWidget):
 
     def _fill_remembered_credentials(self) -> None:
         try:
-            config = load_config(Path(self.config_path.text().strip() or "config.toml"))
+            config = load_config(Path(self.config_path.text().strip() or _default_config_path()))
         except Exception:
             return
         if config.tqsdk.username and config.tqsdk.password:
@@ -1604,6 +1604,12 @@ def _split_lines(value: str) -> list[str]:
         if item:
             result.append(item)
     return result
+
+
+def _default_config_path() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().with_name("config.toml")
+    return Path("config.toml")
 
 
 def _evaluation_row_background(evaluation: ConditionEvaluation) -> QBrush | None:

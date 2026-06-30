@@ -26,8 +26,9 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name="kuaiqi-gui",
     debug=False,
     bootloader_ignore_signals=False,
@@ -40,17 +41,13 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name="kuaiqi-gui",
-)
 
+dist_path = Path(DISTPATH)
+dist_path.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(
     Path("config.example.toml"),
-    Path(coll.name) / "config.example.toml",
+    dist_path / "config.example.toml",
 )
+config_path = dist_path / "config.toml"
+if not config_path.exists():
+    shutil.copyfile(Path("config.example.toml"), config_path)

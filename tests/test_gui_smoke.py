@@ -24,6 +24,7 @@ class GuiSmokeTests(unittest.TestCase):
             MainWindow,
             SortableHeader,
             _apply_style,
+            _default_config_path,
             _double_spin,
             _friendly_login_error,
             _format_status_timestamp,
@@ -51,6 +52,14 @@ class GuiSmokeTests(unittest.TestCase):
             _friendly_login_error("Exception: 用户权限认证失败 (401,{'error': 'invalid_grant'})"),
             "TqSdk 登录失败，请检查账号和密码。",
         )
+        self.assertEqual(_default_config_path(), Path("config.toml"))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            executable = Path(tmpdir) / "kuaiqi-gui.exe"
+            with patch("sys.frozen", True, create=True), patch("sys.executable", str(executable)):
+                self.assertEqual(
+                    _default_config_path(),
+                    executable.resolve().with_name("config.toml"),
+                )
         window.username.setText("alice")
         window.password.clear()
         window.username.returnPressed.emit()
