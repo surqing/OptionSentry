@@ -130,6 +130,17 @@ class GuiSmokeTests(unittest.TestCase):
                 table.horizontalHeader().sectionResizeMode(0),
                 QHeaderView.ResizeMode.Interactive,
             )
+        for table in (main_window.active_table, main_window.alert_table):
+            self.assertEqual(
+                table.horizontalHeader().sectionResizeMode(table.columnCount() - 1),
+                QHeaderView.ResizeMode.Stretch,
+            )
+        self.assertEqual(
+            main_window.config_editor.strategies.horizontalHeader().sectionResizeMode(
+                main_window.config_editor.strategies.columnCount() - 1
+            ),
+            QHeaderView.ResizeMode.Interactive,
+        )
         for combo in (
             main_window.config_editor.runtime_mode,
             main_window.config_editor.universe_mode,

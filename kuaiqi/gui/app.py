@@ -67,8 +67,8 @@ FILTERS_PROPERTY = "kuaiqi_filters"
 SORT_ROLE = Qt.ItemDataRole.UserRole
 TOAST_DURATION_MS = 1500
 TOAST_FADE_MS = 150
-CP_NEGATIVE_VALUE_COLOR = "#e6f2eb"
-CP_POSITIVE_VALUE_COLOR = "#f7e6e3"
+CP_NEGATIVE_VALUE_COLOR = "#d8ecdf"
+CP_POSITIVE_VALUE_COLOR = "#f1d7d2"
 
 
 def app_icon() -> QIcon:
@@ -990,7 +990,7 @@ class StrategyEvaluationTable(QGroupBox):
             widths = (165, 100, 100, 360)
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
-        _configure_resizable_columns(self.table, widths)
+        _configure_resizable_columns(self.table, widths, stretch_last=True)
 
     def _append_row(self, record: _EvaluationRecord, include_strategy: bool) -> None:
         row = self.table.rowCount()
@@ -1384,13 +1384,19 @@ def _unique_names(names: Iterable[str]) -> tuple[str, ...]:
     return tuple(unique)
 
 
-def _configure_resizable_columns(table: QTableWidget, widths: tuple[int, ...]) -> None:
+def _configure_resizable_columns(
+    table: QTableWidget,
+    widths: tuple[int, ...],
+    stretch_last: bool = False,
+) -> None:
     header = _ensure_sortable_header(table)
     header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
     header.setMinimumSectionSize(50)
     header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     for column, width in enumerate(widths):
         table.setColumnWidth(column, width)
+    if stretch_last and widths:
+        header.setSectionResizeMode(len(widths) - 1, QHeaderView.ResizeMode.Stretch)
 
 
 def _ensure_sortable_header(table: QTableWidget) -> SortableHeader:
