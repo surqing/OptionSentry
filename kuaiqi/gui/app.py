@@ -67,8 +67,8 @@ FILTERS_PROPERTY = "kuaiqi_filters"
 SORT_ROLE = Qt.ItemDataRole.UserRole
 TOAST_DURATION_MS = 1500
 TOAST_FADE_MS = 150
-CP_NEGATIVE_VALUE_COLOR = "#2f6b4f"
-CP_POSITIVE_VALUE_COLOR = "#a24b46"
+CP_NEGATIVE_VALUE_COLOR = "#e6f2eb"
+CP_POSITIVE_VALUE_COLOR = "#f7e6e3"
 
 
 def app_icon() -> QIcon:
@@ -997,7 +997,7 @@ class StrategyEvaluationTable(QGroupBox):
         self.table.insertRow(row)
         evaluation = record.evaluation
         formatted_timestamp = _format_table_timestamp(record.timestamp)
-        foreground = _evaluation_row_foreground(evaluation)
+        background = _evaluation_row_background(evaluation)
         values: list[tuple[str, object | None]] = [
             (formatted_timestamp, formatted_timestamp),
             (f"{evaluation.value:.8f}", evaluation.value),
@@ -1010,8 +1010,8 @@ class StrategyEvaluationTable(QGroupBox):
             numeric_columns = (2, 3)
         for column, (value, sort_key) in enumerate(values):
             item = _table_item(value, sort_key=sort_key)
-            if foreground is not None:
-                item.setForeground(foreground)
+            if background is not None:
+                item.setBackground(background)
             if column in numeric_columns:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, column, item)
@@ -1600,7 +1600,7 @@ def _split_lines(value: str) -> list[str]:
     return result
 
 
-def _evaluation_row_foreground(evaluation: ConditionEvaluation) -> QBrush | None:
+def _evaluation_row_background(evaluation: ConditionEvaluation) -> QBrush | None:
     if not _is_cp_combo_evaluation(evaluation):
         return None
     if evaluation.value < 0:

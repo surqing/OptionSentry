@@ -263,11 +263,11 @@ class GuiSmokeTests(unittest.TestCase):
         main_window._on_alert(AlertEvent("t1", _evaluation(strategy_name="cp_combo", value=1.0)))
         main_window._on_alert(AlertEvent("t2", _cp_evaluation(value=-1.0, strike=620)))
         self.assertEqual(
-            _row_foreground_colors(main_window.alert_table, 0),
+            _row_background_colors(main_window.alert_table, 0),
             (CP_POSITIVE_VALUE_COLOR,) * main_window.alert_table.columnCount(),
         )
         self.assertEqual(
-            _row_foreground_colors(main_window.alert_table, 1),
+            _row_background_colors(main_window.alert_table, 1),
             (CP_NEGATIVE_VALUE_COLOR,) * main_window.alert_table.columnCount(),
         )
 
@@ -288,10 +288,10 @@ class GuiSmokeTests(unittest.TestCase):
             )
         )
         self.assertEqual(
-            _row_foreground_colors(main_window.active_table, 0),
+            _row_background_colors(main_window.active_table, 0),
             (CP_NEGATIVE_VALUE_COLOR,) * main_window.active_table.columnCount(),
         )
-        self.assertFalse(_row_has_custom_foreground(main_window.active_table, 1))
+        self.assertFalse(_row_has_custom_background(main_window.active_table, 1))
         main_window.close()
 
     def test_table_headers_sort_rows_by_column_content(self) -> None:
@@ -728,18 +728,18 @@ def _visible_column_texts(table, column: int) -> tuple[str, ...]:
     )
 
 
-def _row_foreground_colors(table, row: int) -> tuple[str, ...]:
+def _row_background_colors(table, row: int) -> tuple[str, ...]:
     return tuple(
-        table.item(row, column).foreground().color().name()
+        table.item(row, column).background().color().name()
         for column in range(table.columnCount())
     )
 
 
-def _row_has_custom_foreground(table, row: int) -> bool:
+def _row_has_custom_background(table, row: int) -> bool:
     from PyQt6.QtCore import Qt
 
     return any(
-        table.item(row, column).foreground().style() != Qt.BrushStyle.NoBrush
+        table.item(row, column).background().style() != Qt.BrushStyle.NoBrush
         for column in range(table.columnCount())
     )
 
