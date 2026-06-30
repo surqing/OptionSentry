@@ -981,11 +981,11 @@ class StrategyEvaluationTable(QGroupBox):
             return
         self._include_strategy_column = include_strategy
         if include_strategy:
-            headers = ("时间", "策略名", "值", "阈值", "合约", "消息")
-            widths = (165, 130, 100, 100, 280, 420)
+            headers = ("时间", "策略名", "值", "阈值", "合约")
+            widths = (165, 130, 100, 100, 360)
         else:
-            headers = ("时间", "值", "阈值", "合约", "消息")
-            widths = (165, 100, 100, 280, 420)
+            headers = ("时间", "值", "阈值", "合约")
+            widths = (165, 100, 100, 360)
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         _configure_resizable_columns(self.table, widths)
@@ -1000,7 +1000,6 @@ class StrategyEvaluationTable(QGroupBox):
             (f"{evaluation.value:.8f}", evaluation.value),
             (f"{evaluation.threshold:.8f}", evaluation.threshold),
             (", ".join(evaluation.symbols), None),
-            (evaluation.message, None),
         ]
         numeric_columns = (1, 2)
         if include_strategy:

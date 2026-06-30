@@ -147,6 +147,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(main_window.tabs.currentIndex(), 2)
         self.assertEqual(main_window.alert_table.item(0, 0).text(), "2026-06-26 23:41:05")
         self.assertIn("策略名", _table_headers(main_window.alert_table))
+        self.assertNotIn("消息", _table_headers(main_window.alert_table))
         self.assertEqual(main_window.alert_table.item(0, 1).text(), "cp_combo")
 
         main_window._on_alert(_alert_event("2026-06-26 23:42:05", strategy_name="abs_spread"))
@@ -178,6 +179,7 @@ class GuiSmokeTests(unittest.TestCase):
         )
         self.assertEqual(main_window.status_labels["timestamp"].text(), "2026-06-26 23:41:05.9")
         self.assertIn("策略名", _table_headers(main_window.active_table))
+        self.assertNotIn("消息", _table_headers(main_window.active_table))
         self.assertEqual(main_window.active_table.rowCount(), 2)
         self.assertEqual(main_window.active_table.item(0, 2).text(), "1.00000000")
         main_window.active_view.set_strategy_filter("abs_spread")
@@ -402,7 +404,7 @@ class GuiSmokeTests(unittest.TestCase):
                 compute_ms=0.0,
             )
         )
-        self.assertEqual(set(_column_texts(main_window.active_table, 5)), {"message kept", "message removed"})
+        self.assertEqual(set(_column_texts(main_window.active_table, 2)), {"1.00000000", "2.00000000"})
 
         main_window._on_cycle(
             RunnerCycle(
@@ -422,7 +424,7 @@ class GuiSmokeTests(unittest.TestCase):
         )
         main_window._refresh_active_table_from_cache()
 
-        self.assertEqual(set(_column_texts(main_window.active_table, 5)), {"message kept", "message added"})
+        self.assertEqual(set(_column_texts(main_window.active_table, 2)), {"1.00000000", "3.00000000"})
         self.assertEqual(_column_texts(main_window.active_table, 2), ("1.00000000", "3.00000000"))
         app.processEvents()
         main_window.close()
