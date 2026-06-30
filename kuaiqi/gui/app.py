@@ -420,7 +420,7 @@ class MainWindow(QMainWindow):
         self._monitor_thread: QThread | None = None
         self._monitor_worker: MonitorWorker | None = None
         self._running = False
-        self._latest_active_records: tuple[_EvaluationRecord, ...] = ()
+        self._active_records_by_key: dict[str, _EvaluationRecord] = {}
         self._latest_active_cycle_count = 0
         self._last_displayed_active_cycle_count = 0
         self._manual_active_refresh_pending = False
@@ -622,30 +622,22 @@ class MainWindow(QMainWindow):
         follow_latest = _table_is_at_bottom(self.alert_table)
         self.alert_view.append_record(event.timestamp, event.evaluation, scroll_to_bottom=follow_latest)
 
-    def _populate_active_table(
-        self,
-        timestamp: str,
-        evaluations: tuple[ConditionEvaluation, ...],
-    ) -> None:
-        active = [evaluation for evaluation in evaluations if evaluation.active]
-        self.active_view.set_records(_EvaluationRecord(timestamp, evaluation) for evaluation in active)
-
     def _cache_active_records(self, cycle: RunnerCycle) -> None:
-        self._latest_active_records = tuple(
-            _EvaluationRecord(cycle.timestamp, evaluation)
-            for evaluation in cycle.evaluations
-            if evaluation.active
-        )
+        for evaluation in cycle.evaluations:
+            if evaluation.active:
+                self._active_records_by_key[evaluation.key] = _EvaluationRecord(cycle.timestamp, evaluation)
+            else:
+                self._active_records_by_key.pop(evaluation.key, None)
         self._latest_active_cycle_count = cycle.cycle_count
 
     def _reset_active_records(self) -> None:
-        self._latest_active_records = ()
+        self._active_records_by_key.clear()
         self._latest_active_cycle_count = 0
         self._last_displayed_active_cycle_count = 0
         self._cancel_active_manual_refresh()
 
     def _refresh_active_table_from_cache(self) -> None:
-        self.active_view.set_records(self._latest_active_records)
+        self.active_view.set_records(self._active_records_by_key.values())
         self._last_displayed_active_cycle_count = self._latest_active_cycle_count
 
     def _request_active_manual_refresh(self) -> None:

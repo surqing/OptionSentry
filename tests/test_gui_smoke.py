@@ -360,12 +360,70 @@ class GuiSmokeTests(unittest.TestCase):
 
         main_window.active_refresh_interval.setCurrentIndex(0)
         self.assertEqual(main_window._active_auto_refresh_timer.interval(), 10000)
-        self.assertEqual(main_window.active_table.item(0, 2).text(), "2.00000000")
+        self.assertEqual(_column_texts(main_window.active_table, 2), ("1.00000000", "2.00000000"))
 
         main_window.auto_active_refresh.setChecked(False)
         self.assertFalse(main_window._active_auto_refresh_timer.isActive())
         main_window._on_cycle(_cycle(3, value=3.0))
-        self.assertEqual(main_window.active_table.item(0, 2).text(), "2.00000000")
+        self.assertEqual(_column_texts(main_window.active_table, 2), ("1.00000000", "2.00000000"))
+        app.processEvents()
+        main_window.close()
+
+    def test_active_table_tracks_global_active_cache_across_incremental_cycles(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtWidgets import QApplication
+
+        from kuaiqi.config import parse_config
+        from kuaiqi.gui.app import MainWindow
+        from kuaiqi.gui.credentials import CredentialResolution
+        from kuaiqi.runner import RunnerCycle
+
+        app = QApplication.instance() or QApplication([])
+        config = parse_config({"strategies": [{"type": "cp_combo", "threshold": 0.01}]})
+        main_window = MainWindow(
+            Path("config.toml"),
+            config,
+            CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
+        )
+
+        main_window._on_cycle(
+            RunnerCycle(
+                cycle_count=1,
+                timestamp="t1",
+                evaluations=(
+                    _evaluation(suffix="kept", value=1.0),
+                    _evaluation(suffix="removed", value=2.0),
+                ),
+                total_conditions=2,
+                active_count=2,
+                alerts=(),
+                total_alerts=0,
+                changed_count=2,
+                compute_ms=0.0,
+            )
+        )
+        self.assertEqual(set(_column_texts(main_window.active_table, 5)), {"message kept", "message removed"})
+
+        main_window._on_cycle(
+            RunnerCycle(
+                cycle_count=2,
+                timestamp="t2",
+                evaluations=(
+                    _evaluation(suffix="removed", active=False, value=0.0),
+                    _evaluation(suffix="added", value=3.0),
+                ),
+                total_conditions=2,
+                active_count=2,
+                alerts=(),
+                total_alerts=0,
+                changed_count=2,
+                compute_ms=0.0,
+            )
+        )
+        main_window._refresh_active_table_from_cache()
+
+        self.assertEqual(set(_column_texts(main_window.active_table, 5)), {"message kept", "message added"})
+        self.assertEqual(_column_texts(main_window.active_table, 2), ("1.00000000", "3.00000000"))
         app.processEvents()
         main_window.close()
 
@@ -407,7 +465,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertFalse(main_window._manual_active_refresh_pending)
         self.assertTrue(main_window.manual_active_refresh_button.isEnabled())
         self.assertEqual(main_window.manual_active_refresh_button.text(), "手动刷新")
-        self.assertEqual(main_window.active_table.item(0, 2).text(), "4.00000000")
+        self.assertEqual(_column_texts(main_window.active_table, 2), ("1.00000000", "4.00000000"))
 
         main_window._request_active_manual_refresh()
         with patch("kuaiqi.gui.app.QMessageBox.warning") as warning:
@@ -544,11 +602,16 @@ def _alert_event(timestamp: str, strategy_name: str = "cp_combo", value: float =
     )
 
 
-def _evaluation(strategy_name: str = "cp_combo", suffix: str = "eval", value: float = 1.0) -> ConditionEvaluation:
+def _evaluation(
+    strategy_name: str = "cp_combo",
+    suffix: str = "eval",
+    value: float = 1.0,
+    active: bool = True,
+) -> ConditionEvaluation:
     return ConditionEvaluation(
         key=f"key:{strategy_name}:{suffix}",
         strategy_name=strategy_name,
-        active=True,
+        active=active,
         value=value,
         threshold=0.1,
         symbols=("SHFE.au2608C600", "SHFE.au2608P600", "SHFE.au2608"),
