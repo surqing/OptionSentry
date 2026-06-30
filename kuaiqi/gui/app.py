@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from PyQt6.QtCore import QEasingCurve, QObject, QPropertyAnimation, QRect, QTimer, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QBrush, QColor, QIcon
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -67,6 +67,8 @@ FILTERS_PROPERTY = "kuaiqi_filters"
 SORT_ROLE = Qt.ItemDataRole.UserRole
 TOAST_DURATION_MS = 1500
 TOAST_FADE_MS = 150
+CP_NEGATIVE_VALUE_COLOR = "#1a7f37"
+CP_POSITIVE_VALUE_COLOR = "#cf222e"
 
 
 def app_icon() -> QIcon:
@@ -995,6 +997,7 @@ class StrategyEvaluationTable(QGroupBox):
         self.table.insertRow(row)
         evaluation = record.evaluation
         formatted_timestamp = _format_table_timestamp(record.timestamp)
+        foreground = _evaluation_row_foreground(evaluation)
         values: list[tuple[str, object | None]] = [
             (formatted_timestamp, formatted_timestamp),
             (f"{evaluation.value:.8f}", evaluation.value),
@@ -1007,6 +1010,8 @@ class StrategyEvaluationTable(QGroupBox):
             numeric_columns = (2, 3)
         for column, (value, sort_key) in enumerate(values):
             item = _table_item(value, sort_key=sort_key)
+            if foreground is not None:
+                item.setForeground(foreground)
             if column in numeric_columns:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, column, item)
@@ -1593,6 +1598,24 @@ def _split_lines(value: str) -> list[str]:
         if item:
             result.append(item)
     return result
+
+
+def _evaluation_row_foreground(evaluation: ConditionEvaluation) -> QBrush | None:
+    if not _is_cp_combo_evaluation(evaluation):
+        return None
+    if evaluation.value < 0:
+        return QBrush(QColor(CP_NEGATIVE_VALUE_COLOR))
+    if evaluation.value > 0:
+        return QBrush(QColor(CP_POSITIVE_VALUE_COLOR))
+    return None
+
+
+def _is_cp_combo_evaluation(evaluation: ConditionEvaluation) -> bool:
+    if evaluation.strategy_name == "cp_combo":
+        return True
+    parts = evaluation.key.split(":")
+    # Strategy names can be localized, so the CP key shape is the stable marker.
+    return len(parts) >= 6 and parts[3].startswith("K=")
 
 
 def _table_item(text: str, sort_key: object | None = None) -> SortableTableWidgetItem:

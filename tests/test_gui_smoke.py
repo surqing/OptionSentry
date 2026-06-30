@@ -236,6 +236,64 @@ class GuiSmokeTests(unittest.TestCase):
         main_window.close()
         window.close()
 
+    def test_cp_combo_signed_values_color_alert_and_active_rows(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtWidgets import QApplication
+
+        from kuaiqi.config import parse_config
+        from kuaiqi.gui.app import CP_NEGATIVE_VALUE_COLOR, CP_POSITIVE_VALUE_COLOR, MainWindow
+        from kuaiqi.gui.credentials import CredentialResolution
+        from kuaiqi.runner import RunnerCycle
+
+        app = QApplication.instance() or QApplication([])
+        config = parse_config(
+            {
+                "strategies": [
+                    {"type": "cp_combo", "threshold": 0.01, "name": "CP组合预警"},
+                    {"type": "abs_spread", "threshold": 0.1, "name": "价差预警"},
+                ]
+            }
+        )
+        main_window = MainWindow(
+            Path("config.toml"),
+            config,
+            CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
+        )
+
+        main_window._on_alert(AlertEvent("t1", _evaluation(strategy_name="cp_combo", value=1.0)))
+        main_window._on_alert(AlertEvent("t2", _cp_evaluation(value=-1.0, strike=620)))
+        self.assertEqual(
+            _row_foreground_colors(main_window.alert_table, 0),
+            (CP_POSITIVE_VALUE_COLOR,) * main_window.alert_table.columnCount(),
+        )
+        self.assertEqual(
+            _row_foreground_colors(main_window.alert_table, 1),
+            (CP_NEGATIVE_VALUE_COLOR,) * main_window.alert_table.columnCount(),
+        )
+
+        main_window._on_cycle(
+            RunnerCycle(
+                cycle_count=1,
+                timestamp="t3",
+                evaluations=(
+                    _cp_evaluation(value=-2.0, strike=640),
+                    _evaluation(strategy_name="价差预警", value=-2.0),
+                ),
+                total_conditions=2,
+                active_count=2,
+                alerts=(),
+                total_alerts=0,
+                changed_count=0,
+                compute_ms=0.0,
+            )
+        )
+        self.assertEqual(
+            _row_foreground_colors(main_window.active_table, 0),
+            (CP_NEGATIVE_VALUE_COLOR,) * main_window.active_table.columnCount(),
+        )
+        self.assertFalse(_row_has_custom_foreground(main_window.active_table, 1))
+        main_window.close()
+
     def test_table_headers_sort_rows_by_column_content(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
@@ -621,6 +679,20 @@ def _evaluation(
     )
 
 
+def _cp_evaluation(value: float, strike: int = 600, strategy_name: str = "CP组合预警") -> ConditionEvaluation:
+    call_symbol = f"SHFE.au2608C{strike}"
+    put_symbol = f"SHFE.au2608P{strike}"
+    return ConditionEvaluation(
+        key=f"{strategy_name}:SHFE.au2608:2026-8:K={strike}:{call_symbol}:{put_symbol}",
+        strategy_name=strategy_name,
+        active=True,
+        value=value,
+        threshold=0.01,
+        symbols=(call_symbol, put_symbol, "SHFE.au2608"),
+        message=f"message cp {strike}",
+    )
+
+
 def _cycle(cycle_count: int, value: float = 1.0, strategy_name: str = "cp_combo") -> object:
     from kuaiqi.runner import RunnerCycle
 
@@ -653,6 +725,22 @@ def _visible_column_texts(table, column: int) -> tuple[str, ...]:
         table.item(row, column).text()
         for row in range(table.rowCount())
         if not table.isRowHidden(row)
+    )
+
+
+def _row_foreground_colors(table, row: int) -> tuple[str, ...]:
+    return tuple(
+        table.item(row, column).foreground().color().name()
+        for column in range(table.columnCount())
+    )
+
+
+def _row_has_custom_foreground(table, row: int) -> bool:
+    from PyQt6.QtCore import Qt
+
+    return any(
+        table.item(row, column).foreground().style() != Qt.BrushStyle.NoBrush
+        for column in range(table.columnCount())
     )
 
 
