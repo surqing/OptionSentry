@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from kuaiqi.symbols import normalize_symbols
+from optionsentry.symbols import normalize_symbols
 
 
 class ConfigError(ValueError):
@@ -100,7 +100,7 @@ class NotifierConfig:
 class LoggingConfig:
     level: str = "INFO"
     log_dir: str = "logs"
-    log_file: str = "kuaiqi.log"
+    log_file: str = "optionsentry.log"
     max_bytes: int = 5_000_000
     backup_count: int = 5
     cycle_summary_interval_seconds: int = 60
@@ -265,7 +265,7 @@ def _parse_logging(data: dict[str, Any]) -> LoggingConfig:
     return LoggingConfig(
         level=str(data.get("level", "INFO")),
         log_dir=str(data.get("log_dir", "logs")),
-        log_file=str(data.get("log_file", "kuaiqi.log")),
+        log_file=str(data.get("log_file", "optionsentry.log")),
         max_bytes=int(data.get("max_bytes", 5_000_000)),
         backup_count=int(data.get("backup_count", 5)),
         cycle_summary_interval_seconds=int(data.get("cycle_summary_interval_seconds", 60)),

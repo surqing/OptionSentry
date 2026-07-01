@@ -63,9 +63,9 @@ failure_backoff_seconds = 300
 
 [logging]
 level = "INFO"
-# Runtime mode is inserted as a subdirectory: logs/live/kuaiqi.log or logs/backtest/kuaiqi.log.
+# Runtime mode is inserted as a subdirectory: logs/live/optionsentry.log or logs/backtest/optionsentry.log.
 log_dir = "logs"
-log_file = "kuaiqi.log"
+log_file = "optionsentry.log"
 # Rotating logs cap disk usage at about max_bytes * (backup_count + 1).
 max_bytes = 5000000
 backup_count = 5

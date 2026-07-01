@@ -10,11 +10,11 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
-from kuaiqi.alerts import AlertEngine
-from kuaiqi.config import ConfigError
-from kuaiqi.data_sources.tqsdk_source import TqSdkDataSource
-from kuaiqi.models import InstrumentMeta, MarketSnapshot, Universe
-from kuaiqi.strategies import AbsSpreadStrategy, CPComboStrategy, Strategy
+from optionsentry.alerts import AlertEngine
+from optionsentry.config import ConfigError
+from optionsentry.data_sources.tqsdk_source import TqSdkDataSource
+from optionsentry.models import InstrumentMeta, MarketSnapshot, Universe
+from optionsentry.strategies import AbsSpreadStrategy, CPComboStrategy, Strategy
 from tests.helpers import sample_universe
 
 

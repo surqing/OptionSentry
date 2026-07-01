@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from kuaiqi.models import AlertEvent, ConditionEvaluation
+from optionsentry.models import AlertEvent, ConditionEvaluation
 
 
 @dataclass

@@ -5,10 +5,10 @@ import unittest
 from dataclasses import dataclass
 from typing import Iterator
 
-from kuaiqi.alerts import AlertEngine
-from kuaiqi.models import AlertEvent, MarketSnapshot, Universe
-from kuaiqi.runner import AlertRunner
-from kuaiqi.strategies import CPComboStrategy
+from optionsentry.alerts import AlertEngine
+from optionsentry.models import AlertEvent, MarketSnapshot, Universe
+from optionsentry.runner import AlertRunner
+from optionsentry.strategies import CPComboStrategy
 from tests.helpers import sample_universe, snapshot
 
 

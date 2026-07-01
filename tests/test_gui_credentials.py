@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from kuaiqi.config import ConfigError, parse_config
-from kuaiqi.gui.credentials import (
+from optionsentry.config import ConfigError, parse_config
+from optionsentry.gui.credentials import (
     apply_session_credentials,
     load_and_validate_login,
     resolve_tqsdk_credentials,

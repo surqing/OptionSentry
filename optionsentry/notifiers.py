@@ -12,9 +12,9 @@ from html import escape
 from pathlib import Path
 from typing import Protocol
 
-from kuaiqi.config import AppConfig, ConfigError, EmailConfig
-from kuaiqi.log_paths import mode_scoped_file
-from kuaiqi.models import AlertEvent
+from optionsentry.config import AppConfig, ConfigError, EmailConfig
+from optionsentry.log_paths import mode_scoped_file
+from optionsentry.models import AlertEvent
 
 
 class NotificationError(RuntimeError):
@@ -182,14 +182,14 @@ def _event_text(event: AlertEvent) -> str:
 
 def _email_subject(events: tuple[AlertEvent, ...]) -> str:
     if len(events) == 1:
-        return f"KuaiQi 预警: {events[0].evaluation.strategy_name}"
-    return f"KuaiQi 预警汇总: {len(events)} 条"
+        return f"OptionSentry 预警: {events[0].evaluation.strategy_name}"
+    return f"OptionSentry 预警汇总: {len(events)} 条"
 
 
 def _email_plain_body(events: tuple[AlertEvent, ...]) -> str:
     rows = _email_rows(events)
     lines = [
-        "KuaiQi 预警汇总",
+        "OptionSentry 预警汇总",
         _email_summary_text(events),
         "",
         "触发时间 | 预警类型 | 监控对象 | 方向/结构 | 执行价 | 当前指标值 | 阈值 | 触发条件 | 相关合约",
@@ -223,7 +223,7 @@ def _email_html_body(events: tuple[AlertEvent, ...]) -> str:
 <body style="margin:0;padding:24px;background:#f6f8fa;color:#1f2328;font-family:Arial,'Microsoft YaHei',sans-serif;">
   <div style="max-width:1200px;margin:0 auto;background:#ffffff;border:1px solid #d8dee4;border-radius:8px;overflow:hidden;">
     <div style="padding:20px 24px;border-bottom:1px solid #d8dee4;background:#f0f6ff;">
-      <h2 style="margin:0 0 8px;font-size:20px;line-height:1.35;color:#0969da;">KuaiQi 实盘预警</h2>
+      <h2 style="margin:0 0 8px;font-size:20px;line-height:1.35;color:#0969da;">OptionSentry 实盘预警</h2>
       <p style="margin:0;font-size:14px;line-height:1.7;color:#57606a;">{escape(_email_summary_text(events))}</p>
     </div>
     <div style="padding:20px 24px;">

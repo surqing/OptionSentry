@@ -10,9 +10,9 @@ from email import message_from_string
 from pathlib import Path
 from unittest.mock import patch
 
-from kuaiqi.config import EmailConfig, parse_config
-from kuaiqi.models import AlertEvent, ConditionEvaluation
-from kuaiqi.notifiers import (
+from optionsentry.config import EmailConfig, parse_config
+from optionsentry.models import AlertEvent, ConditionEvaluation
+from optionsentry.notifiers import (
     CompositeNotifier,
     EmailNotifier,
     JsonlAlertRecorder,
@@ -33,8 +33,8 @@ class NotifierTests(unittest.TestCase):
         )
 
         with (
-            patch("kuaiqi.notifiers.smtplib.SMTP", _CapturingSMTP),
-            patch("kuaiqi.notifiers.time.monotonic", side_effect=[0.0, 30.0, 59.0, 60.0]),
+            patch("optionsentry.notifiers.smtplib.SMTP", _CapturingSMTP),
+            patch("optionsentry.notifiers.time.monotonic", side_effect=[0.0, 30.0, 59.0, 60.0]),
         ):
             _CapturingSMTP.calls = 0
             _CapturingSMTP.messages = []
@@ -70,7 +70,7 @@ class NotifierTests(unittest.TestCase):
         message = message_from_string(_CapturingSMTP.messages[0])
         plain_body = _message_part(message, "text/plain")
         html_body = _message_part(message, "text/html")
-        self.assertEqual(_decoded_header(message["Subject"]), "KuaiQi 预警汇总: 2 条")
+        self.assertEqual(_decoded_header(message["Subject"]), "OptionSentry 预警汇总: 2 条")
         self.assertIn("本次邮件包含 2 条新触发预警", plain_body)
         self.assertIn("触发时间 | 预警类型 | 监控对象 | 方向/结构", plain_body)
         self.assertIn("CP组合预警", plain_body)
@@ -104,7 +104,7 @@ class NotifierTests(unittest.TestCase):
             )
         )
 
-        with patch("kuaiqi.notifiers.smtplib.SMTP", _CapturingSMTP):
+        with patch("optionsentry.notifiers.smtplib.SMTP", _CapturingSMTP):
             _CapturingSMTP.calls = 0
             _CapturingSMTP.messages = []
             email.notify(
@@ -156,7 +156,7 @@ class NotifierTests(unittest.TestCase):
         )
 
         with (
-            patch("kuaiqi.notifiers.smtplib.SMTP", _CapturingSMTP),
+            patch("optionsentry.notifiers.smtplib.SMTP", _CapturingSMTP),
             patch.dict(os.environ, {"MAIL_PASSWORD_ENV": "env-secret"}),
         ):
             _CapturingSMTP.calls = 0
@@ -182,7 +182,7 @@ class NotifierTests(unittest.TestCase):
             recorder_path = Path(tmpdir) / "alerts.jsonl"
             notifier = CompositeNotifier((email, JsonlAlertRecorder(recorder_path)))
 
-            with patch("kuaiqi.notifiers.smtplib.SMTP", _FailingSMTP):
+            with patch("optionsentry.notifiers.smtplib.SMTP", _FailingSMTP):
                 _FailingSMTP.calls = 0
                 notifier.notify(event)
                 with self.assertRaises(NotificationError):

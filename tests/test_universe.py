@@ -6,9 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from kuaiqi.config import ConfigError, load_config, parse_config
-from kuaiqi.models import InstrumentMeta, Universe
-from kuaiqi.data_sources.tqsdk_source import TqSdkDataSource, _row_to_meta
+from optionsentry.config import ConfigError, load_config, parse_config
+from optionsentry.models import InstrumentMeta, Universe
+from optionsentry.data_sources.tqsdk_source import TqSdkDataSource, _row_to_meta
 from tests.helpers import sample_universe
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kuaiqi.models import InstrumentMeta, MarketSnapshot, Universe
+from optionsentry.models import InstrumentMeta, MarketSnapshot, Universe
 
 
 def sample_universe() -> Universe:

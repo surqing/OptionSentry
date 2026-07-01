@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from kuaiqi.config import parse_config
-from kuaiqi.gui.config_store import config_to_data, save_config
+from optionsentry.config import parse_config
+from optionsentry.gui.config_store import config_to_data, save_config
 
 
 class GuiConfigStoreTests(unittest.TestCase):

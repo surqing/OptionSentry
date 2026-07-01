@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from kuaiqi.symbols import normalize_symbol, normalize_symbols
+from optionsentry.symbols import normalize_symbol, normalize_symbols
 
 
 @dataclass(frozen=True)

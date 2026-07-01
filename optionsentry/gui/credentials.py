@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, MutableMapping
 
-from kuaiqi.config import AppConfig, ConfigError, load_config
+from optionsentry.config import AppConfig, ConfigError, load_config
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,7 @@ from typing import Any
 
 import tomlkit
 
-from kuaiqi.config import AppConfig, ConfigError, parse_config
+from optionsentry.config import AppConfig, ConfigError, parse_config
 
 
 def config_to_data(config: AppConfig) -> dict[str, Any]:

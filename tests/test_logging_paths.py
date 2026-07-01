@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from kuaiqi.config import LoggingConfig
-from kuaiqi.log_paths import mode_scoped_dir, mode_scoped_file
-from kuaiqi.logging_config import setup_logging
+from optionsentry.config import LoggingConfig
+from optionsentry.log_paths import mode_scoped_dir, mode_scoped_file
+from optionsentry.logging_config import setup_logging
 
 
 class LoggingPathTests(unittest.TestCase):
@@ -28,7 +28,7 @@ class LoggingPathTests(unittest.TestCase):
             logger = setup_logging(
                 LoggingConfig(
                     log_dir=tmpdir,
-                    log_file="kuaiqi.log",
+                    log_file="optionsentry.log",
                     max_bytes=100_000,
                     backup_count=1,
                 ),
@@ -39,7 +39,7 @@ class LoggingPathTests(unittest.TestCase):
                 for handler in logger.handlers:
                     handler.flush()
 
-                log_path = Path(tmpdir) / "backtest" / "kuaiqi.log"
+                log_path = Path(tmpdir) / "backtest" / "optionsentry.log"
                 self.assertTrue(log_path.exists())
                 self.assertIn("mode scoped log", log_path.read_text(encoding="utf-8"))
             finally:

@@ -1,4 +1,4 @@
-"""KuaiQi futures option alert system."""
+"""OptionSentry futures option alert system."""
 
 __all__ = ["__version__"]
 

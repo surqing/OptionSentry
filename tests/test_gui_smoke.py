@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from kuaiqi.models import AlertEvent, ConditionEvaluation
+from optionsentry.models import AlertEvent, ConditionEvaluation
 
 
 class GuiSmokeTests(unittest.TestCase):
@@ -15,8 +15,8 @@ class GuiSmokeTests(unittest.TestCase):
         from PyQt6.QtWidgets import QApplication, QHeaderView, QToolBar
         from PyQt6.QtCore import Qt
 
-        from kuaiqi.config import parse_config
-        from kuaiqi.gui.app import (
+        from optionsentry.config import parse_config
+        from optionsentry.gui.app import (
             APP_ICON_PATH,
             APP_NAME,
             TOAST_DURATION_MS,
@@ -32,8 +32,8 @@ class GuiSmokeTests(unittest.TestCase):
             _spin,
             app_icon,
         )
-        from kuaiqi.gui.credentials import CredentialResolution
-        from kuaiqi.runner import RunnerCycle
+        from optionsentry.gui.credentials import CredentialResolution
+        from optionsentry.runner import RunnerCycle
 
         app = QApplication.instance() or QApplication([])
         _apply_style(app)
@@ -54,7 +54,7 @@ class GuiSmokeTests(unittest.TestCase):
         )
         self.assertEqual(_default_config_path(), Path("config.toml"))
         with tempfile.TemporaryDirectory() as tmpdir:
-            executable = Path(tmpdir) / "kuaiqi-gui.exe"
+            executable = Path(tmpdir) / "optionsentry-gui.exe"
             with patch("sys.frozen", True, create=True), patch("sys.executable", str(executable)):
                 self.assertEqual(
                     _default_config_path(),
@@ -260,10 +260,10 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from kuaiqi.config import parse_config
-        from kuaiqi.gui.app import CP_NEGATIVE_VALUE_COLOR, CP_POSITIVE_VALUE_COLOR, MainWindow
-        from kuaiqi.gui.credentials import CredentialResolution
-        from kuaiqi.runner import RunnerCycle
+        from optionsentry.config import parse_config
+        from optionsentry.gui.app import CP_NEGATIVE_VALUE_COLOR, CP_POSITIVE_VALUE_COLOR, MainWindow
+        from optionsentry.gui.credentials import CredentialResolution
+        from optionsentry.runner import RunnerCycle
 
         app = QApplication.instance() or QApplication([])
         config = parse_config(
@@ -318,9 +318,9 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from kuaiqi.config import parse_config
-        from kuaiqi.gui.app import MainWindow
-        from kuaiqi.gui.credentials import CredentialResolution
+        from optionsentry.config import parse_config
+        from optionsentry.gui.app import MainWindow
+        from optionsentry.gui.credentials import CredentialResolution
 
         app = QApplication.instance() or QApplication([])
         config = parse_config(
@@ -363,9 +363,9 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from kuaiqi.config import parse_config
-        from kuaiqi.gui.app import MainWindow, _set_table_filter_text
-        from kuaiqi.gui.credentials import CredentialResolution
+        from optionsentry.config import parse_config
+        from optionsentry.gui.app import MainWindow, _set_table_filter_text
+        from optionsentry.gui.credentials import CredentialResolution
 
         app = QApplication.instance() or QApplication([])
         config = parse_config({"strategies": [{"type": "cp_combo", "threshold": 0.01}]})
@@ -401,9 +401,9 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from kuaiqi.config import parse_config
-        from kuaiqi.gui.app import MainWindow
-        from kuaiqi.gui.credentials import CredentialResolution
+        from optionsentry.config import parse_config
+        from optionsentry.gui.app import MainWindow
+        from optionsentry.gui.credentials import CredentialResolution
 
         app = QApplication.instance() or QApplication([])
         config = parse_config(
@@ -453,10 +453,10 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from kuaiqi.config import parse_config
-        from kuaiqi.gui.app import MainWindow
-        from kuaiqi.gui.credentials import CredentialResolution
-        from kuaiqi.runner import RunnerCycle
+        from optionsentry.config import parse_config
+        from optionsentry.gui.app import MainWindow
+        from optionsentry.gui.credentials import CredentialResolution
+        from optionsentry.runner import RunnerCycle
 
         app = QApplication.instance() or QApplication([])
         config = parse_config({"strategies": [{"type": "cp_combo", "threshold": 0.01}]})
@@ -511,9 +511,9 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from kuaiqi.config import parse_config
-        from kuaiqi.gui.app import MainWindow
-        from kuaiqi.gui.credentials import CredentialResolution
+        from optionsentry.config import parse_config
+        from optionsentry.gui.app import MainWindow
+        from optionsentry.gui.credentials import CredentialResolution
 
         app = QApplication.instance() or QApplication([])
         config = parse_config(
@@ -528,7 +528,7 @@ class GuiSmokeTests(unittest.TestCase):
             CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
         )
 
-        with patch("kuaiqi.gui.app.QMessageBox.information") as information:
+        with patch("optionsentry.gui.app.QMessageBox.information") as information:
             main_window._request_active_manual_refresh()
         information.assert_called_once()
         self.assertFalse(main_window._manual_active_refresh_pending)
@@ -548,7 +548,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(_column_texts(main_window.active_table, 2), ("1.00000000", "4.00000000"))
 
         main_window._request_active_manual_refresh()
-        with patch("kuaiqi.gui.app.QMessageBox.warning") as warning:
+        with patch("optionsentry.gui.app.QMessageBox.warning") as warning:
             main_window._on_active_manual_refresh_timeout()
         warning.assert_called_once()
         self.assertFalse(main_window._manual_active_refresh_pending)
@@ -561,9 +561,9 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from kuaiqi.config import load_config, parse_config
-        from kuaiqi.gui.app import LoginWindow, _apply_style
-        from kuaiqi.gui.credentials import CredentialResolution
+        from optionsentry.config import load_config, parse_config
+        from optionsentry.gui.app import LoginWindow, _apply_style
+        from optionsentry.gui.credentials import CredentialResolution
 
         app = QApplication.instance() or QApplication([])
         _apply_style(app)
@@ -612,9 +612,9 @@ class GuiSmokeTests(unittest.TestCase):
         from PyQt6.QtCore import Qt
         from PyQt6.QtWidgets import QApplication
 
-        from kuaiqi.config import load_config, parse_config
-        from kuaiqi.gui.app import MainWindow
-        from kuaiqi.gui.credentials import CredentialResolution
+        from optionsentry.config import load_config, parse_config
+        from optionsentry.gui.app import MainWindow
+        from optionsentry.gui.credentials import CredentialResolution
 
         app = QApplication.instance() or QApplication([])
         config = parse_config(
@@ -714,7 +714,7 @@ def _cp_evaluation(value: float, strike: int = 600, strategy_name: str = "CP组�
 
 
 def _cycle(cycle_count: int, value: float = 1.0, strategy_name: str = "CP组合预警") -> object:
-    from kuaiqi.runner import RunnerCycle
+    from optionsentry.runner import RunnerCycle
 
     return RunnerCycle(
         cycle_count=cycle_count,

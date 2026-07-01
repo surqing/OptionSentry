@@ -5,11 +5,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
-from kuaiqi.alerts import AlertEngine
-from kuaiqi.data_sources.base import MarketDataSource
-from kuaiqi.models import AlertEvent, ConditionEvaluation, Universe
-from kuaiqi.notifiers import Notifier
-from kuaiqi.strategies import Strategy
+from optionsentry.alerts import AlertEngine
+from optionsentry.data_sources.base import MarketDataSource
+from optionsentry.models import AlertEvent, ConditionEvaluation, Universe
+from optionsentry.notifiers import Notifier
+from optionsentry.strategies import Strategy
 
 
 @dataclass(frozen=True)

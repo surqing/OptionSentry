@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from kuaiqi.alerts import AlertEngine
-from kuaiqi.models import ConditionEvaluation
+from optionsentry.alerts import AlertEngine
+from optionsentry.models import ConditionEvaluation
 
 
 def evaluation(active: bool) -> ConditionEvaluation:

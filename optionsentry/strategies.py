@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from itertools import combinations
 from typing import Iterable
 
-from kuaiqi.config import StrategyConfig, strategy_display_name
-from kuaiqi.models import ConditionEvaluation, InstrumentMeta, MarketSnapshot, Universe
-from kuaiqi.symbols import normalize_symbols
+from optionsentry.config import StrategyConfig, strategy_display_name
+from optionsentry.models import ConditionEvaluation, InstrumentMeta, MarketSnapshot, Universe
+from optionsentry.symbols import normalize_symbols
 
 
 class CompiledStrategy:

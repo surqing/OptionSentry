@@ -1,4 +1,4 @@
-from kuaiqi.cli import main
+from optionsentry.cli import main
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterator, Protocol
 
-from kuaiqi.models import MarketSnapshot, Universe
+from optionsentry.models import MarketSnapshot, Universe
 
 
 class MarketDataSource(Protocol):

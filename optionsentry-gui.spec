@@ -5,11 +5,11 @@ import shutil
 
 
 a = Analysis(
-    ["kuaiqi_gui.py"],
+    ["optionsentry_gui.py"],
     pathex=[],
     binaries=[],
     datas=[
-        ("kuaiqi/gui/assets", "kuaiqi/gui/assets"),
+        ("optionsentry/gui/assets", "optionsentry/gui/assets"),
     ],
     hiddenimports=[
         "PyQt6.QtSvg",
@@ -29,7 +29,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="kuaiqi-gui",
+    name="optionsentry-gui",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

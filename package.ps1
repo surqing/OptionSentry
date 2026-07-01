@@ -58,7 +58,7 @@ function Get-PackagedExecutableProcesses {
 
     $expectedPath = [System.IO.Path]::GetFullPath($ExePath)
     return @(
-        Get-Process -Name "kuaiqi-gui" -ErrorAction SilentlyContinue |
+        Get-Process -Name "optionsentry-gui" -ErrorAction SilentlyContinue |
             Where-Object {
                 try {
                     if (-not $_.Path) {
@@ -87,9 +87,9 @@ function Stop-PackagedExecutableProcesses {
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
-$SpecPath = Resolve-WorkspacePath -Root $Root -RelativePath "kuaiqi-gui.spec"
+$SpecPath = Resolve-WorkspacePath -Root $Root -RelativePath "optionsentry-gui.spec"
 $DistPath = Resolve-WorkspacePath -Root $Root -RelativePath "dist"
-$ExePath = Resolve-WorkspacePath -Root $Root -RelativePath "dist\kuaiqi-gui.exe"
+$ExePath = Resolve-WorkspacePath -Root $Root -RelativePath "dist\optionsentry-gui.exe"
 $ConfigPath = Resolve-WorkspacePath -Root $Root -RelativePath "dist\config.toml"
 $ExampleConfigPath = Resolve-WorkspacePath -Root $Root -RelativePath "dist\config.example.toml"
 
@@ -102,7 +102,7 @@ if (-not (Test-Path -LiteralPath $SpecPath)) {
 $running = Get-PackagedExecutableProcesses -ExePath $ExePath
 if ($running) {
     if (-not $StopRunning) {
-        throw "dist\kuaiqi-gui.exe is running. Please close it before packaging, or rerun this script with -StopRunning."
+        throw "dist\optionsentry-gui.exe is running. Please close it before packaging, or rerun this script with -StopRunning."
     }
     Write-Step "Stopping running packaged executable"
     Stop-PackagedExecutableProcesses -ExePath $ExePath
@@ -119,10 +119,10 @@ else {
 if (-not $NoClean) {
     Write-Step "Cleaning previous build output"
     Remove-WorkspaceItem -Root $Root -RelativePath "build" -Recurse
-    Remove-WorkspaceItem -Root $Root -RelativePath "dist\kuaiqi-gui" -Recurse
-    Remove-WorkspaceItem -Root $Root -RelativePath "dist\kuaiqi-gui.exe"
+    Remove-WorkspaceItem -Root $Root -RelativePath "dist\optionsentry-gui" -Recurse
+    Remove-WorkspaceItem -Root $Root -RelativePath "dist\optionsentry-gui.exe"
     Remove-WorkspaceItem -Root $Root -RelativePath "dist\config.example.toml"
-    Remove-WorkspaceItem -Root $Root -RelativePath "dist\kuaiqi.zip"
+    Remove-WorkspaceItem -Root $Root -RelativePath "dist\optionsentry.zip"
 }
 else {
     Write-Step "Keeping previous build output"
@@ -141,8 +141,8 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
 if (-not (Test-Path -LiteralPath $ExampleConfigPath)) {
     throw "Example config file was not generated: $ExampleConfigPath"
 }
-if (Test-Path -LiteralPath (Resolve-WorkspacePath -Root $Root -RelativePath "dist\kuaiqi-gui")) {
-    throw "Unexpected one-dir output still exists: dist\kuaiqi-gui"
+if (Test-Path -LiteralPath (Resolve-WorkspacePath -Root $Root -RelativePath "dist\optionsentry-gui")) {
+    throw "Unexpected one-dir output still exists: dist\optionsentry-gui"
 }
 
 if ($SmokeTest) {
@@ -152,7 +152,7 @@ if ($SmokeTest) {
     $process.Refresh()
     $smokeProcesses = Get-PackagedExecutableProcesses -ExePath $ExePath
     if (-not $smokeProcesses) {
-        throw "Smoke test failed: kuaiqi-gui.exe exited early with code $($process.ExitCode)."
+        throw "Smoke test failed: optionsentry-gui.exe exited early with code $($process.ExitCode)."
     }
     Stop-PackagedExecutableProcesses -ExePath $ExePath
     Write-Host "Smoke test passed."
@@ -160,6 +160,6 @@ if ($SmokeTest) {
 
 Write-Step "Package ready"
 Get-ChildItem -LiteralPath $DistPath -File |
-    Where-Object { $_.Name -in @("kuaiqi-gui.exe", "config.toml", "config.example.toml") } |
+    Where-Object { $_.Name -in @("optionsentry-gui.exe", "config.toml", "config.example.toml") } |
     Select-Object Name, Length, LastWriteTime |
     Format-Table -AutoSize

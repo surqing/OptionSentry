@@ -40,15 +40,15 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from kuaiqi.config import AppConfig, ActiveAlertsViewConfig, ConfigError, load_config, strategy_display_name
-from kuaiqi.gui.config_store import data_to_config, save_config
-from kuaiqi.gui.credentials import CredentialResolution, load_and_validate_login
-from kuaiqi.gui.runner_adapter import GuiRunSignals, build_gui_runner
-from kuaiqi.models import AlertEvent, ConditionEvaluation, Universe
-from kuaiqi.runner import RunnerCycle
+from optionsentry.config import AppConfig, ActiveAlertsViewConfig, ConfigError, load_config, strategy_display_name
+from optionsentry.gui.config_store import data_to_config, save_config
+from optionsentry.gui.credentials import CredentialResolution, load_and_validate_login
+from optionsentry.gui.runner_adapter import GuiRunSignals, build_gui_runner
+from optionsentry.models import AlertEvent, ConditionEvaluation, Universe
+from optionsentry.runner import RunnerCycle
 
 
-APP_NAME = "期权预警系统"
+APP_NAME = "OptionSentry"
 APP_ICON_PATH = Path(__file__).with_name("assets") / "app_icon.svg"
 ALL_STRATEGIES_LABEL = "全部策略"
 ACTIVE_REFRESH_OPTIONS = (
@@ -60,10 +60,10 @@ ACTIVE_REFRESH_OPTIONS = (
     ("10min", 600),
 )
 MANUAL_ACTIVE_REFRESH_TIMEOUT_MS = 3000
-SORT_COLUMN_PROPERTY = "kuaiqi_sort_column"
-SORT_LABEL_PROPERTY = "kuaiqi_sort_label"
-SORT_ORDER_PROPERTY = "kuaiqi_sort_order"
-FILTERS_PROPERTY = "kuaiqi_filters"
+SORT_COLUMN_PROPERTY = "optionsentry_sort_column"
+SORT_LABEL_PROPERTY = "optionsentry_sort_label"
+SORT_ORDER_PROPERTY = "optionsentry_sort_order"
+FILTERS_PROPERTY = "optionsentry_filters"
 SORT_ROLE = Qt.ItemDataRole.UserRole
 TOAST_DURATION_MS = 1500
 TOAST_FADE_MS = 150
@@ -1305,7 +1305,7 @@ class ConfigEditor(QWidget):
             "logging": {
                 "level": self.log_level.currentText(),
                 "log_dir": self.log_dir.text().strip() or "logs",
-                "log_file": self.log_file.text().strip() or "kuaiqi.log",
+                "log_file": self.log_file.text().strip() or "optionsentry.log",
                 "max_bytes": self.max_bytes.value(),
                 "backup_count": self.backup_count.value(),
                 "cycle_summary_interval_seconds": self.cycle_summary_interval_seconds.value(),
@@ -1404,10 +1404,10 @@ def _ensure_sortable_header(table: QTableWidget) -> SortableHeader:
     if not isinstance(header, SortableHeader):
         header = SortableHeader(Qt.Orientation.Horizontal, table)
         table.setHorizontalHeader(header)
-    if not getattr(table, "_kuaiqi_sort_connected", False):
+    if not getattr(table, "_optionsentry_sort_connected", False):
         header.sectionClicked.connect(lambda column, current_table=table: _toggle_table_sort(current_table, column))
         header.filterRequested.connect(lambda column, current_table=table: _prompt_table_filter(current_table, column))
-        setattr(table, "_kuaiqi_sort_connected", True)
+        setattr(table, "_optionsentry_sort_connected", True)
     table.setSortingEnabled(False)
     return header
 

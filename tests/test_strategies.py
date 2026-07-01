@@ -3,9 +3,9 @@ from __future__ import annotations
 import math
 import unittest
 
-from kuaiqi.config import StrategyConfig, strategy_display_name
-from kuaiqi.strategies import AbsSpreadStrategy, CPComboStrategy
-from kuaiqi.strategies import build_strategy
+from optionsentry.config import StrategyConfig, strategy_display_name
+from optionsentry.strategies import AbsSpreadStrategy, CPComboStrategy
+from optionsentry.strategies import build_strategy
 from tests.helpers import sample_universe, snapshot
 
 

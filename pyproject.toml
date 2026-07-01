@@ -1,7 +1,7 @@
 [project]
-name = "kuaiqi"
+name = "optionsentry"
 version = "0.1.0"
-description = "Add your description here"
+description = "OptionSentry futures option alert system"
 requires-python = ">=3.11"
 dependencies = [
     "pyqt6>=6.11.0",
@@ -10,8 +10,8 @@ dependencies = [
 ]
 
 [project.scripts]
-kuaiqi = "kuaiqi.cli:main"
-kuaiqi-gui = "kuaiqi.gui.app:main"
+optionsentry = "optionsentry.cli:main"
+optionsentry-gui = "optionsentry.gui.app:main"
 
 [build-system]
 requires = ["hatchling"]

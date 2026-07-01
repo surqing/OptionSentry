@@ -3,17 +3,17 @@ from __future__ import annotations
 import argparse
 import sys
 
-from kuaiqi.alerts import AlertEngine
-from kuaiqi.config import ConfigError, load_config
-from kuaiqi.data_sources import TqSdkDataSource
-from kuaiqi.logging_config import setup_logging
-from kuaiqi.notifiers import build_notifier
-from kuaiqi.runner import AlertRunner
-from kuaiqi.strategies import build_strategy
+from optionsentry.alerts import AlertEngine
+from optionsentry.config import ConfigError, load_config
+from optionsentry.data_sources import TqSdkDataSource
+from optionsentry.logging_config import setup_logging
+from optionsentry.notifiers import build_notifier
+from optionsentry.runner import AlertRunner
+from optionsentry.strategies import build_strategy
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="KuaiQi futures option alert system")
+    parser = argparse.ArgumentParser(description="OptionSentry futures option alert system")
     parser.add_argument("--config", default="config.toml", help="Path to TOML config")
     args = parser.parse_args(argv)
 
@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config(args.config)
         logger = setup_logging(config.logging, config.runtime.mode)
         logger.info(
-            "Starting KuaiQi mode=%s strategies=%s universe_mode=%s",
+            "Starting OptionSentry mode=%s strategies=%s universe_mode=%s",
             config.runtime.mode,
             [strategy.type for strategy in config.selected_strategies],
             config.universe.mode,

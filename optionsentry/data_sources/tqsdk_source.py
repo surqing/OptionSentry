@@ -9,9 +9,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Iterator
 
-from kuaiqi.config import AppConfig, ConfigError
-from kuaiqi.models import InstrumentMeta, MarketSnapshot, Universe
-from kuaiqi.symbols import normalize_symbol, tqsdk_api_symbol
+from optionsentry.config import AppConfig, ConfigError
+from optionsentry.models import InstrumentMeta, MarketSnapshot, Universe
+from optionsentry.symbols import normalize_symbol, tqsdk_api_symbol
 
 
 FUTURE_EXCHANGES = {"CFFEX", "SHFE", "DCE", "CZCE", "INE", "GFEX"}

@@ -5,14 +5,14 @@ from dataclasses import dataclass
 from threading import Event
 from typing import Callable
 
-from kuaiqi.alerts import AlertEngine
-from kuaiqi.config import AppConfig
-from kuaiqi.data_sources import TqSdkDataSource
-from kuaiqi.logging_config import setup_logging
-from kuaiqi.models import AlertEvent
-from kuaiqi.notifiers import build_notifier
-from kuaiqi.runner import AlertRunner, RunnerCallbacks, RunnerCycle
-from kuaiqi.strategies import build_strategy
+from optionsentry.alerts import AlertEngine
+from optionsentry.config import AppConfig
+from optionsentry.data_sources import TqSdkDataSource
+from optionsentry.logging_config import setup_logging
+from optionsentry.models import AlertEvent
+from optionsentry.notifiers import build_notifier
+from optionsentry.runner import AlertRunner, RunnerCallbacks, RunnerCycle
+from optionsentry.strategies import build_strategy
 
 
 @dataclass
