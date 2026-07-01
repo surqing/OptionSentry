@@ -12,7 +12,7 @@ from optionsentry.models import AlertEvent, ConditionEvaluation
 class GuiSmokeTests(unittest.TestCase):
     def test_pyqt_login_window_constructs_offscreen(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        from PyQt6.QtWidgets import QApplication, QHeaderView, QToolBar
+        from PyQt6.QtWidgets import QApplication, QHeaderView, QSpinBox, QToolBar
         from PyQt6.QtCore import Qt
 
         from optionsentry.config import parse_config
@@ -101,6 +101,11 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertIs(main_window.reload_action, main_window.config_editor.reload_button)
         self.assertEqual(main_window.config_editor.save_button.text(), "保存配置")
         self.assertEqual(main_window.config_editor.reload_button.text(), "重新加载")
+        self.assertIsInstance(main_window.config_editor.min_volume, QSpinBox)
+        self.assertIsInstance(main_window.config_editor.min_open_interest, QSpinBox)
+        main_window.config_editor.min_volume.setValue(100)
+        self.assertEqual(main_window.config_editor.min_volume.text(), "100")
+        self.assertEqual(main_window.config_editor.build_config().universe.min_volume, 100)
         self.assertEqual(main_window.config_editor.strategies.columnCount(), 4)
         self.assertGreaterEqual(main_window.config_editor.strategies.minimumHeight(), 180)
         self.assertEqual(

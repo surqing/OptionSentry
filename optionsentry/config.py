@@ -30,8 +30,8 @@ class UniverseConfig:
     underlyings: tuple[str, ...] = ()
     symbols: tuple[str, ...] = ()
     exchange_ids: tuple[str, ...] = ()
-    min_volume: float = 0.0
-    min_open_interest: float = 0.0
+    min_volume: int = 0
+    min_open_interest: int = 0
 
 
 @dataclass(frozen=True)
@@ -179,8 +179,8 @@ def _parse_universe(data: dict[str, Any]) -> UniverseConfig:
         underlyings=normalize_symbols(_tuple_of_str(data.get("underlyings", ()))),
         symbols=normalize_symbols(_tuple_of_str(data.get("symbols", ()))),
         exchange_ids=normalize_symbols(_tuple_of_str(data.get("exchange_ids", ()))),
-        min_volume=float(data.get("min_volume", 0)),
-        min_open_interest=float(data.get("min_open_interest", 0)),
+        min_volume=_integer_value(data.get("min_volume", 0), "universe.min_volume"),
+        min_open_interest=_integer_value(data.get("min_open_interest", 0), "universe.min_open_interest"),
     )
 
 
@@ -336,6 +336,22 @@ def _tuple_of_str(value: Any) -> tuple[str, ...]:
     if isinstance(value, str):
         return (value,)
     return tuple(str(item) for item in value)
+
+
+def _integer_value(value: Any, name: str) -> int:
+    if isinstance(value, bool):
+        raise ConfigError(f"{name} must be an integer.")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{name} must be an integer.") from exc
+    if not number.is_integer():
+        raise ConfigError(f"{name} must be an integer.")
+    return int(number)
 
 
 def _optional_int(value: Any) -> int | None:

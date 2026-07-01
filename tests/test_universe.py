@@ -119,17 +119,35 @@ class UniverseTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(config.universe.min_volume, 1.0)
-        self.assertEqual(config.universe.min_open_interest, 2.0)
+        self.assertEqual(config.universe.min_volume, 1)
+        self.assertEqual(config.universe.min_open_interest, 2)
         self.assertEqual(config.logging.cycle_summary_interval_seconds, 60)
         self.assertTrue(config.gui.active_alerts.auto_refresh)
         self.assertEqual(config.gui.active_alerts.refresh_interval_seconds, 10)
+
+        legacy_config = parse_config(
+            {
+                "runtime": {},
+                "universe": {"min_volume": 100.0, "min_open_interest": 200.0},
+                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+            }
+        )
+        self.assertEqual(legacy_config.universe.min_volume, 100)
+        self.assertEqual(legacy_config.universe.min_open_interest, 200)
 
         with self.assertRaises(ConfigError):
             parse_config(
                 {
                     "runtime": {},
                     "universe": {"min_volume": -1},
+                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                }
+            )
+        with self.assertRaises(ConfigError):
+            parse_config(
+                {
+                    "runtime": {},
+                    "universe": {"min_volume": 1.5},
                     "strategies": [{"type": "cp_combo", "threshold": 0.01}],
                 }
             )
