@@ -61,7 +61,10 @@ function Get-PackagedExecutableProcesses {
         Get-Process -Name "kuaiqi-gui" -ErrorAction SilentlyContinue |
             Where-Object {
                 try {
-                    $_.Path -and ([System.IO.Path]::GetFullPath($_.Path) -eq $expectedPath)
+                    if (-not $_.Path) {
+                        return $true
+                    }
+                    [System.IO.Path]::GetFullPath($_.Path) -eq $expectedPath
                 }
                 catch {
                     $false

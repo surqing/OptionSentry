@@ -94,6 +94,54 @@ class NotifierTests(unittest.TestCase):
         self.assertIn("价差比例小于阈值（0.1）", plain_body)
         self.assertIn("价差比例小于阈值（0.1）", html_body)
 
+    def test_email_formats_alert_rows_with_localized_strategy_names(self) -> None:
+        email = EmailNotifier(
+            EmailConfig(
+                smtp_host="smtp.example.com",
+                from_addr="from@example.com",
+                to_addrs=("to@example.com",),
+                alert_interval_seconds=60,
+            )
+        )
+
+        with patch("kuaiqi.notifiers.smtplib.SMTP", _CapturingSMTP):
+            _CapturingSMTP.calls = 0
+            _CapturingSMTP.messages = []
+            email.notify(
+                _event(
+                    timestamp="t1",
+                    key="CP组合预警:SHFE.au2608:2026-8:K=600:SHFE.au2608C600:SHFE.au2608P600",
+                    strategy_name="CP组合预警",
+                    value=-0.03559322,
+                    threshold=0.01,
+                    symbols=("SHFE.au2608C600", "SHFE.au2608P600", "SHFE.au2608"),
+                )
+            )
+            email.notify(
+                _event(
+                    timestamp="t2",
+                    key=(
+                        "价差预警:GFEX.lc2608:2026-7:PUT:"
+                        "GFEX.lc2608-P-128000:GFEX.lc2608-P-130000"
+                    ),
+                    strategy_name="价差预警",
+                    value=0.08,
+                    threshold=0.1,
+                    symbols=("GFEX.lc2608-P-128000", "GFEX.lc2608-P-130000"),
+                )
+            )
+            email.flush(force=True)
+
+        self.assertEqual(_CapturingSMTP.calls, 1)
+        message = message_from_string(_CapturingSMTP.messages[0])
+        plain_body = _message_part(message, "text/plain")
+        self.assertIn("CP组合预警", plain_body)
+        self.assertIn("价差预警", plain_body)
+        self.assertIn("认购 + 认沽 + 标的", plain_body)
+        self.assertIn("认沽", plain_body)
+        self.assertIn("K=600", plain_body)
+        self.assertIn("128000 / 130000", plain_body)
+
     def test_email_password_prefers_config_value_over_environment(self) -> None:
         email = EmailNotifier(
             EmailConfig(

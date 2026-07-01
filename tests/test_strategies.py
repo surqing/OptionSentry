@@ -3,11 +3,28 @@ from __future__ import annotations
 import math
 import unittest
 
+from kuaiqi.config import StrategyConfig, strategy_display_name
 from kuaiqi.strategies import AbsSpreadStrategy, CPComboStrategy
+from kuaiqi.strategies import build_strategy
 from tests.helpers import sample_universe, snapshot
 
 
 class StrategyTests(unittest.TestCase):
+    def test_strategy_display_name_defaults_to_chinese_label(self) -> None:
+        cp_config = StrategyConfig(type="cp_combo", threshold=0.01)
+        spread_config = StrategyConfig(type="abs_spread", threshold=0.1)
+
+        self.assertEqual(strategy_display_name(cp_config), "CP组合预警")
+        self.assertEqual(strategy_display_name(spread_config), "价差预警")
+        self.assertEqual(build_strategy(cp_config).name, "CP组合预警")
+        self.assertEqual(build_strategy(spread_config).name, "价差预警")
+
+    def test_strategy_display_name_preserves_explicit_name(self) -> None:
+        config = StrategyConfig(type="cp_combo", threshold=0.01, name="custom")
+
+        self.assertEqual(strategy_display_name(config), "custom")
+        self.assertEqual(build_strategy(config).name, "custom")
+
     def test_cp_combo_uses_absolute_threshold(self) -> None:
         universe = sample_universe()
         snap = snapshot(

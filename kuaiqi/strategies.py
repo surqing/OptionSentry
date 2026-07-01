@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from itertools import combinations
 from typing import Iterable
 
-from kuaiqi.config import StrategyConfig
+from kuaiqi.config import StrategyConfig, strategy_display_name
 from kuaiqi.models import ConditionEvaluation, InstrumentMeta, MarketSnapshot, Universe
 
 
@@ -201,7 +201,7 @@ class _CompiledAbsSpreadStrategy(CompiledStrategy):
 
 
 def build_strategy(config: StrategyConfig) -> Strategy:
-    name = config.name or config.type
+    name = strategy_display_name(config)
     if config.type == "cp_combo":
         return CPComboStrategy(threshold=config.threshold, name=name)
     if config.type == "abs_spread":

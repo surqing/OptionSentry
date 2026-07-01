@@ -60,6 +60,18 @@ class StrategyConfig:
     selected: bool = True
 
 
+DEFAULT_STRATEGY_DISPLAY_NAMES = {
+    "cp_combo": "CP组合预警",
+    "abs_spread": "价差预警",
+}
+
+
+def strategy_display_name(strategy: StrategyConfig) -> str:
+    if strategy.name:
+        return strategy.name
+    return DEFAULT_STRATEGY_DISPLAY_NAMES.get(strategy.type, strategy.type)
+
+
 @dataclass(frozen=True)
 class EmailConfig:
     smtp_host: str | None = None

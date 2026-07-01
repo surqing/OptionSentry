@@ -279,7 +279,7 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
     evaluation = event.evaluation
     strategy_label = _strategy_label(evaluation.strategy_name)
     parsed = _parse_alert_key(evaluation.key)
-    if evaluation.strategy_name == "cp_combo" and parsed:
+    if parsed.get("strategy_type") == "cp_combo":
         monitor = f"{parsed.get('underlying', '')} {parsed.get('expiry', '')}".strip()
         strike = parsed.get("strike", "-")
         value = _format_number(evaluation.value)
@@ -295,7 +295,7 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
             trigger_condition=_threshold_condition("绝对偏离率", "大于", threshold),
             symbols=", ".join(evaluation.symbols),
         )
-    if evaluation.strategy_name == "abs_spread" and parsed:
+    if parsed.get("strategy_type") == "abs_spread":
         direction = _option_class_label(parsed.get("option_class", ""))
         first_strike = parsed.get("first_strike", "")
         second_strike = parsed.get("second_strike", "")
@@ -370,17 +370,19 @@ def _option_class_label(option_class: str) -> str:
 
 def _parse_alert_key(key: str) -> dict[str, str]:
     parts = key.split(":")
-    if len(parts) >= 6 and parts[0] == "cp_combo":
+    if len(parts) >= 6 and (parts[0] == "cp_combo" or parts[3].startswith("K=")):
         return {
             "strategy": parts[0],
+            "strategy_type": "cp_combo",
             "underlying": parts[1],
             "expiry": parts[2],
             "strike": parts[3].removeprefix("K="),
         }
-    if len(parts) >= 6 and parts[0] == "abs_spread":
+    if len(parts) >= 6 and (parts[0] == "abs_spread" or parts[3] in {"CALL", "PUT"}):
         first_strike, second_strike = _extract_spread_strikes(parts[4], parts[5])
         return {
             "strategy": parts[0],
+            "strategy_type": "abs_spread",
             "underlying": parts[1],
             "expiry": parts[2],
             "option_class": parts[3],

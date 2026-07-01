@@ -40,7 +40,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from kuaiqi.config import AppConfig, ActiveAlertsViewConfig, ConfigError, load_config
+from kuaiqi.config import AppConfig, ActiveAlertsViewConfig, ConfigError, load_config, strategy_display_name
 from kuaiqi.gui.config_store import data_to_config, save_config
 from kuaiqi.gui.credentials import CredentialResolution, load_and_validate_login
 from kuaiqi.gui.runner_adapter import GuiRunSignals, build_gui_runner
@@ -727,7 +727,7 @@ class MainWindow(QMainWindow):
         )
 
     def _set_strategy_filters(self, config: AppConfig) -> None:
-        strategy_names = [strategy.name or strategy.type for strategy in config.selected_strategies]
+        strategy_names = [strategy_display_name(strategy) for strategy in config.selected_strategies]
         self.active_view.set_strategy_names(strategy_names)
         self.alert_view.set_strategy_names(strategy_names)
 
