@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, for example v0.1.1"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Build and publish Windows package
+    runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      UV_LINK_MODE: copy
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Sync dependencies
+        run: uv sync --locked --dev
+
+      - name: Check tag matches project version
+        shell: pwsh
+        run: |
+          $content = Get-Content -LiteralPath .\pyproject.toml -Raw
+          if ($content -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
+              throw "Could not find project version in pyproject.toml."
+          }
+          $version = $Matches[1]
+          $expectedTag = "v$version"
+          if ($env:RELEASE_TAG -ne $expectedTag) {
+              throw "Release tag $env:RELEASE_TAG does not match pyproject.toml version $version."
+          }
+
+      - name: Build Windows package
+        shell: pwsh
+        run: .\package.ps1 -StopRunning -SmokeTest
+
+      - name: Verify release artifacts
+        shell: pwsh
+        run: |
+          $version = $env:RELEASE_TAG.TrimStart("v")
+          $packageBaseName = "OptionSentry-v$version-windows-x64"
+          $zipPath = "dist\$packageBaseName.zip"
+          $hashPath = "dist\$packageBaseName.zip.sha256.txt"
+          $exePath = "dist\optionsentry-gui\optionsentry-gui.exe"
+          $legacyExePath = "dist\optionsentry-gui.exe"
+
+          foreach ($path in @($zipPath, $hashPath, $exePath)) {
+              if (-not (Test-Path -LiteralPath $path)) {
+                  throw "Expected artifact was not generated: $path"
+              }
+          }
+          if (Test-Path -LiteralPath $legacyExePath) {
+              throw "Unexpected root-level one-file executable exists: $legacyExePath"
+          }
+
+          $expectedHash = (Get-Content -LiteralPath $hashPath).Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries)[0]
+          $actualHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
+          if ($expectedHash -ne $actualHash) {
+              throw "SHA256 mismatch for $zipPath."
+          }
+
+          $entries = tar -tf $zipPath
+          $expectedExeEntry = "$packageBaseName/optionsentry-gui.exe"
+          if ($entries -notcontains $expectedExeEntry) {
+              throw "Zip does not contain expected executable entry: $expectedExeEntry"
+          }
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: OptionSentry ${{ env.RELEASE_TAG }}
+          body: |
+            Windows package built from ${{ env.RELEASE_TAG }}.
+
+            Packaging changes:
+            - Uses PyInstaller onedir output.
+            - Disables UPX compression to reduce antivirus false positives.
+            - Includes a SHA256 checksum file.
+          files: |
+            dist/OptionSentry-${{ env.RELEASE_TAG }}-windows-x64.zip
+            dist/OptionSentry-${{ env.RELEASE_TAG }}-windows-x64.zip.sha256.txt
