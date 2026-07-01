@@ -7,6 +7,7 @@ from typing import Iterable
 
 from kuaiqi.config import StrategyConfig, strategy_display_name
 from kuaiqi.models import ConditionEvaluation, InstrumentMeta, MarketSnapshot, Universe
+from kuaiqi.symbols import normalize_symbols
 
 
 class CompiledStrategy:
@@ -299,7 +300,7 @@ def _affected_condition_ids(
     if changed_symbols is None:
         return range(condition_count)
     condition_ids: set[int] = set()
-    for symbol in changed_symbols:
+    for symbol in normalize_symbols(changed_symbols):
         condition_ids.update(condition_ids_by_symbol.get(symbol, ()))
     return sorted(condition_ids)
 

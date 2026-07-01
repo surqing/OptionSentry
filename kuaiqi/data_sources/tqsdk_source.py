@@ -11,6 +11,7 @@ from typing import Any, Callable, Iterator
 
 from kuaiqi.config import AppConfig, ConfigError
 from kuaiqi.models import InstrumentMeta, MarketSnapshot, Universe
+from kuaiqi.symbols import normalize_symbol, tqsdk_api_symbol
 
 
 FUTURE_EXCHANGES = {"CFFEX", "SHFE", "DCE", "CZCE", "INE", "GFEX"}
@@ -59,7 +60,7 @@ class TqSdkDataSource:
                 filtered_options,
             )
             instruments = {**future_underlyings, **filtered_options}
-            universe = Universe(instruments=instruments, requested_symbols=tuple(sorted(option_symbols)))
+            universe = Universe(instruments=instruments, requested_symbols=tuple(sorted(option_metas)))
             self.logger.info(
                 "Discovered universe: options=%s futures=%s price_symbols=%s",
                 len(universe.options),
@@ -118,7 +119,7 @@ class TqSdkDataSource:
         if universe_config.mode == "underlyings":
             symbols = []
             for underlying in universe_config.underlyings:
-                symbols.extend(list(api.query_options(underlying, expired=False)))
+                symbols.extend(list(api.query_options(tqsdk_api_symbol(underlying), expired=False)))
             return sorted(set(symbols))
 
         provided_metas = self._query_metas(api, universe_config.symbols)
@@ -130,14 +131,14 @@ class TqSdkDataSource:
             if option.is_option and option.underlying_symbol:
                 underlying_symbols.add(option.underlying_symbol)
         for underlying in sorted(underlying_symbols):
-            option_symbols.update(api.query_options(underlying, expired=False))
+            option_symbols.update(api.query_options(tqsdk_api_symbol(underlying), expired=False))
         return sorted(option_symbols)
 
     def _query_metas(self, api: Any, symbols: list[str] | tuple[str, ...]) -> dict[str, InstrumentMeta]:
         if not symbols:
             return {}
         result: dict[str, InstrumentMeta] = {}
-        symbol_list = list(symbols)
+        symbol_list = [tqsdk_api_symbol(symbol) for symbol in symbols]
         batch_size = self.config.tqsdk.symbol_info_batch_size
         batches = list(_batches(symbol_list, batch_size))
         if len(batches) > 1:
@@ -195,7 +196,12 @@ class TqSdkDataSource:
                 len(missing_metric_symbols),
                 len(metas),
             )
-            metrics.update(self._query_liquidity_metrics(sorted(missing_metric_symbols)))
+            metrics.update(
+                self._query_liquidity_metrics(
+                    sorted(missing_metric_symbols),
+                    _api_symbols_by_internal_symbol(metas),
+                )
+            )
             used_quote_scan = True
 
         kept_futures = {
@@ -221,11 +227,16 @@ class TqSdkDataSource:
         )
         return kept_futures, kept_options, used_quote_scan
 
-    def _query_liquidity_metrics(self, symbols: list[str]) -> dict[str, tuple[float | None, float | None]]:
+    def _query_liquidity_metrics(
+        self,
+        symbols: list[str],
+        api_symbols_by_symbol: dict[str, str] | None = None,
+    ) -> dict[str, tuple[float | None, float | None]]:
         if not symbols:
             return {}
         metrics: dict[str, tuple[float | None, float | None]] = {}
         missing_symbols: list[str] = []
+        api_symbols_by_symbol = api_symbols_by_symbol or {}
         batch_size = self.config.tqsdk.quote_subscription_batch_size
         batches = list(_batches(symbols, batch_size))
         for batch_index, batch in enumerate(batches, start=1):
@@ -239,7 +250,8 @@ class TqSdkDataSource:
             )
             batch_api = self._create_api()
             try:
-                quotes = dict(zip(batch, batch_api.get_quote_list(batch), strict=True))
+                api_batch = [api_symbols_by_symbol.get(symbol, tqsdk_api_symbol(symbol)) for symbol in batch]
+                quotes = dict(zip(batch, batch_api.get_quote_list(api_batch), strict=True))
                 missing_symbols.extend(self._wait_liquidity_quote_batch(batch_api, quotes))
                 metrics.update(_quote_liquidity_metrics(quotes))
             finally:
@@ -271,7 +283,7 @@ class TqSdkDataSource:
         _validate_live_subscription_size(symbols)
         api = self._consume_live_api() or self._create_api()
         try:
-            quotes = self._subscribe_live_quotes(api, symbols)
+            quotes = self._subscribe_live_quotes(api, symbols, _api_symbols_by_internal_symbol(universe))
             self.logger.info("Subscribed live quotes: %s", len(quotes))
             prices: dict[str, float] = {}
             initialized = False
@@ -328,9 +340,15 @@ class TqSdkDataSource:
             with suppress(Exception):
                 api.close()
 
-    def _subscribe_live_quotes(self, api: Any, symbols: list[str]) -> dict[str, Any]:
+    def _subscribe_live_quotes(
+        self,
+        api: Any,
+        symbols: list[str],
+        api_symbols_by_symbol: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         _validate_live_subscription_size(symbols)
         quotes: dict[str, Any] = {}
+        api_symbols_by_symbol = api_symbols_by_symbol or {}
         batch_size = self.config.tqsdk.quote_subscription_batch_size
         batches = list(_batches(symbols, batch_size))
         for batch_index, batch in enumerate(batches, start=1):
@@ -340,7 +358,8 @@ class TqSdkDataSource:
                 len(batches),
                 len(batch),
             )
-            quotes.update(dict(zip(batch, api.get_quote_list(batch), strict=True)))
+            api_batch = [api_symbols_by_symbol.get(symbol, tqsdk_api_symbol(symbol)) for symbol in batch]
+            quotes.update(dict(zip(batch, api.get_quote_list(api_batch), strict=True)))
             if batch_index < len(batches):
                 api.wait_update(deadline=time.time() + 5)
         return quotes
@@ -361,7 +380,7 @@ class TqSdkDataSource:
 
         api = self._create_api()
         try:
-            serials = self._create_backtest_serials(api, symbols)
+            serials = self._create_backtest_serials(api, symbols, _api_symbols_by_internal_symbol(universe))
             symbols = [symbol for symbol in symbols if symbol in serials]
             self.logger.info("Subscribed backtest K-lines: %s", len(serials))
             last_datetime: Any = None
@@ -421,10 +440,16 @@ class TqSdkDataSource:
         finally:
             api.close()
 
-    def _create_backtest_serials(self, api: Any, symbols: list[str]) -> dict[str, Any]:
+    def _create_backtest_serials(
+        self,
+        api: Any,
+        symbols: list[str],
+        api_symbols_by_symbol: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         from tqsdk.exceptions import BacktestFinished
 
         serials: dict[str, Any] = {}
+        api_symbols_by_symbol = api_symbols_by_symbol or {}
         batch_size = self.config.backtest.subscription_batch_size
         batches = [symbols[index:index + batch_size] for index in range(0, len(symbols), batch_size)]
 
@@ -432,7 +457,7 @@ class TqSdkDataSource:
             async def subscribe_batch(batch_symbols: list[str] = batch) -> None:
                 for symbol in batch_symbols:
                     serials[symbol] = api.get_kline_serial(
-                        symbol,
+                        api_symbols_by_symbol.get(symbol, tqsdk_api_symbol(symbol)),
                         self.config.backtest.duration_seconds,
                         data_length=self.config.backtest.data_length,
                     )
@@ -635,16 +660,16 @@ class TqSdkDataSource:
 def _row_to_meta(row: Any, fallback_symbol: str) -> InstrumentMeta:
     exchange_id = _clean_str(_row_get(row, "exchange_id"))
     raw_symbol = _clean_str(_row_get(row, "instrument_id")) or fallback_symbol
-    symbol = _full_symbol(raw_symbol, exchange_id, fallback_symbol)
-    underlying_symbol = _full_symbol(
+    api_symbol = _full_symbol(raw_symbol, exchange_id, fallback_symbol)
+    api_underlying_symbol = _full_symbol(
         _clean_str(_row_get(row, "underlying_symbol")),
         exchange_id,
         "",
     )
     return InstrumentMeta(
-        symbol=symbol,
+        symbol=normalize_symbol(api_symbol),
         ins_class=_clean_str(_row_get(row, "ins_class")),
-        underlying_symbol=underlying_symbol,
+        underlying_symbol=normalize_symbol(api_underlying_symbol) if api_underlying_symbol else "",
         strike_price=_optional_float(_row_get(row, "strike_price")),
         option_class=_clean_str(_row_get(row, "option_class")),
         exercise_year=_optional_int(_row_get(row, "exercise_year")),
@@ -653,6 +678,8 @@ def _row_to_meta(row: Any, fallback_symbol: str) -> InstrumentMeta:
         product_id=_clean_str(_row_get(row, "product_id")),
         volume=_optional_float(_row_get(row, "volume")),
         open_interest=_optional_float(_row_get(row, "open_interest")),
+        api_symbol=api_symbol,
+        api_underlying_symbol=api_underlying_symbol,
     )
 
 
@@ -796,8 +823,26 @@ def _latest_timestamp(datetimes: dict[str, Any]) -> str:
 
 
 def _looks_like_future_symbol(symbol: str) -> bool:
-    exchange = symbol.split(".", 1)[0] if "." in symbol else ""
+    normalized = normalize_symbol(symbol)
+    exchange = normalized.split(".", 1)[0] if "." in normalized else ""
     return exchange in FUTURE_EXCHANGES
+
+
+def _api_symbols_by_internal_symbol(universe_or_metas: Universe | dict[str, InstrumentMeta]) -> dict[str, str]:
+    metas = (
+        universe_or_metas.instruments.values()
+        if isinstance(universe_or_metas, Universe)
+        else universe_or_metas.values()
+    )
+    result: dict[str, str] = {}
+    for meta in metas:
+        result[meta.symbol] = meta.api_symbol or tqsdk_api_symbol(meta.symbol)
+        if meta.underlying_symbol:
+            result.setdefault(
+                meta.underlying_symbol,
+                meta.api_underlying_symbol or tqsdk_api_symbol(meta.underlying_symbol),
+            )
+    return result
 
 
 def _order_backtest_symbols(universe: Universe, symbols: list[str]) -> list[str]:

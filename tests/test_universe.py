@@ -27,8 +27,8 @@ class UniverseTests(unittest.TestCase):
 
         symbols = universe.price_symbols()
 
-        self.assertIn("SHFE.au2608", symbols)
-        self.assertIn("SHFE.au2608C600", symbols)
+        self.assertIn("SHFE.AU2608", symbols)
+        self.assertIn("SHFE.AU2608C600", symbols)
 
     def test_non_futures_underlying_can_be_filtered_by_builder_logic(self) -> None:
         universe = Universe(
@@ -59,8 +59,10 @@ class UniverseTests(unittest.TestCase):
             "SHFE.au2608C600",
         )
 
-        self.assertEqual(meta.symbol, "SHFE.au2608C600")
-        self.assertEqual(meta.underlying_symbol, "SHFE.au2608")
+        self.assertEqual(meta.symbol, "SHFE.AU2608C600")
+        self.assertEqual(meta.underlying_symbol, "SHFE.AU2608")
+        self.assertEqual(meta.api_symbol, "SHFE.au2608C600")
+        self.assertEqual(meta.api_underlying_symbol, "SHFE.au2608")
 
     def test_tqsdk_row_to_meta_reads_liquidity_metrics(self) -> None:
         meta = _row_to_meta(
@@ -84,10 +86,29 @@ class UniverseTests(unittest.TestCase):
             logger=logging.getLogger("tests.universe.batch_metas"),
         )
 
-        metas = source._query_metas(api, ("A.one", "A.two", "A.three", "A.four", "A.five"))
+        metas = source._query_metas(
+            api,
+            (
+                "SHFE.AU2608",
+                "SHFE.AU2609",
+                "SHFE.AU2610",
+                "SHFE.AU2611",
+                "SHFE.AU2612",
+            ),
+        )
 
-        self.assertEqual(set(metas), {"A.one", "A.two", "A.three", "A.four", "A.five"})
-        self.assertEqual(api.calls, (("A.one", "A.two"), ("A.three", "A.four"), ("A.five",)))
+        self.assertEqual(
+            set(metas),
+            {"SHFE.AU2608", "SHFE.AU2609", "SHFE.AU2610", "SHFE.AU2611", "SHFE.AU2612"},
+        )
+        self.assertEqual(
+            api.calls,
+            (
+                ("SHFE.au2608", "SHFE.au2609"),
+                ("SHFE.au2610", "SHFE.au2611"),
+                ("SHFE.au2612",),
+            ),
+        )
 
     def test_config_parses_universe_liquidity_filters(self) -> None:
         config = parse_config(
@@ -129,6 +150,24 @@ class UniverseTests(unittest.TestCase):
                 }
             )
 
+    def test_config_normalizes_universe_symbols(self) -> None:
+        config = parse_config(
+            {
+                "runtime": {},
+                "universe": {
+                    "mode": "symbols",
+                    "underlyings": ["shfe.au2608"],
+                    "symbols": ["shfe.au2608c600"],
+                    "exchange_ids": ["shfe"],
+                },
+                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+            }
+        )
+
+        self.assertEqual(config.universe.underlyings, ("SHFE.AU2608",))
+        self.assertEqual(config.universe.symbols, ("SHFE.AU2608C600",))
+        self.assertEqual(config.universe.exchange_ids, ("SHFE",))
+
     def test_config_parses_active_alert_refresh_settings(self) -> None:
         config = parse_config(
             {
@@ -159,7 +198,7 @@ class UniverseTests(unittest.TestCase):
 
         self.assertEqual(
             {option.symbol for option in universe.options},
-            {"SHFE.au2608C600", "SHFE.au2608P620"},
+            {"SHFE.AU2608C600", "SHFE.AU2608P620"},
         )
         self.assertFalse(api.quote_list_calls)
         self.assertFalse(api.closed)
@@ -193,7 +232,7 @@ class UniverseTests(unittest.TestCase):
 
         self.assertEqual(
             {option.symbol for option in universe.options},
-            {"SHFE.au2608C600", "SHFE.au2608P620"},
+            {"SHFE.AU2608C600", "SHFE.AU2608P620"},
         )
         self.assertEqual(discovery_api.quote_list_calls, ())
         self.assertEqual(

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from kuaiqi.symbols import normalize_symbol, normalize_symbols
+
 
 @dataclass(frozen=True)
 class InstrumentMeta:
@@ -17,6 +19,20 @@ class InstrumentMeta:
     product_id: str = ""
     volume: float | None = None
     open_interest: float | None = None
+    api_symbol: str = ""
+    api_underlying_symbol: str = ""
+
+    def __post_init__(self) -> None:
+        symbol = str(self.symbol).strip()
+        underlying_symbol = str(self.underlying_symbol).strip()
+        object.__setattr__(self, "symbol", normalize_symbol(symbol))
+        object.__setattr__(self, "underlying_symbol", normalize_symbol(underlying_symbol) if underlying_symbol else "")
+        object.__setattr__(self, "api_symbol", str(self.api_symbol or symbol).strip())
+        object.__setattr__(
+            self,
+            "api_underlying_symbol",
+            str(self.api_underlying_symbol or underlying_symbol).strip(),
+        )
 
     @property
     def is_option(self) -> bool:
@@ -50,6 +66,10 @@ class Universe:
     instruments: dict[str, InstrumentMeta]
     requested_symbols: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        self.instruments = {meta.symbol: meta for meta in self.instruments.values()}
+        self.requested_symbols = tuple(sorted(normalize_symbols(self.requested_symbols)))
+
     @property
     def options(self) -> list[InstrumentMeta]:
         return [meta for meta in self.instruments.values() if meta.is_option]
@@ -77,7 +97,7 @@ class Universe:
         return groups
 
     def subset(self, symbols: Iterable[str]) -> "Universe":
-        wanted = set(symbols)
+        wanted = set(normalize_symbols(symbols))
         instruments = {
             symbol: meta
             for symbol, meta in self.instruments.items()
@@ -100,6 +120,14 @@ class MarketSnapshot:
     changed_symbols: set[str]
     universe: Universe
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "prices",
+            {normalize_symbol(symbol): price for symbol, price in self.prices.items()},
+        )
+        object.__setattr__(self, "changed_symbols", set(normalize_symbols(self.changed_symbols)))
+
 
 @dataclass(frozen=True)
 class ConditionEvaluation:
@@ -110,6 +138,9 @@ class ConditionEvaluation:
     threshold: float
     symbols: tuple[str, ...]
     message: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "symbols", normalize_symbols(self.symbols))
 
 
 @dataclass(frozen=True)

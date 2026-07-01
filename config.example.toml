@@ -5,14 +5,14 @@ alert_on_first_match = false
 
 [universe]
 mode = "underlyings"
-underlyings = ["SHFE.au2608"]
+underlyings = ["SHFE.AU2608"]
 # Live-mode liquidity filters. 0 disables the filter; 1 filters out zero values.
 min_volume = 0
 min_open_interest = 0
 # mode = "all"
 # exchange_ids = ["SHFE", "DCE", "CZCE", "INE", "GFEX", "CFFEX"]
 # mode = "symbols"
-# symbols = ["SHFE.au2608", "SHFE.au2608C600"]
+# symbols = ["SHFE.AU2608", "SHFE.AU2608C600"]
 
 [datasource.tqsdk]
 # username = "your-tqsdk-username"

@@ -7,6 +7,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from kuaiqi.symbols import normalize_symbols
+
 
 class ConfigError(ValueError):
     pass
@@ -174,9 +176,9 @@ def _parse_runtime(data: dict[str, Any]) -> RuntimeConfig:
 def _parse_universe(data: dict[str, Any]) -> UniverseConfig:
     return UniverseConfig(
         mode=str(data.get("mode", "all")),
-        underlyings=_tuple_of_str(data.get("underlyings", ())),
-        symbols=_tuple_of_str(data.get("symbols", ())),
-        exchange_ids=_tuple_of_str(data.get("exchange_ids", ())),
+        underlyings=normalize_symbols(_tuple_of_str(data.get("underlyings", ()))),
+        symbols=normalize_symbols(_tuple_of_str(data.get("symbols", ()))),
+        exchange_ids=normalize_symbols(_tuple_of_str(data.get("exchange_ids", ()))),
         min_volume=float(data.get("min_volume", 0)),
         min_open_interest=float(data.get("min_open_interest", 0)),
     )

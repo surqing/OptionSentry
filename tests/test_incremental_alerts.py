@@ -104,7 +104,7 @@ class IncrementalStrategyTests(unittest.TestCase):
         underlying_evaluations = compiled.evaluate(snap, {"SHFE.au2608"})
 
         self.assertEqual(len(option_evaluations), 1)
-        self.assertEqual(option_evaluations[0].symbols, ("SHFE.au2608C600", "SHFE.au2608C620"))
+        self.assertEqual(option_evaluations[0].symbols, ("SHFE.AU2608C600", "SHFE.AU2608C620"))
         self.assertEqual(underlying_evaluations, [])
 
     def test_incremental_work_scales_with_changed_symbol_not_total_conditions(self) -> None:
@@ -175,7 +175,7 @@ class LivePriceCacheTests(unittest.TestCase):
             api.quote_list_calls,
             (("SHFE.au2608", "SHFE.au2608C600", "SHFE.au2608P600"),),
         )
-        self.assertEqual(first.prices["SHFE.au2608"], 600.0)
+        self.assertEqual(first.prices["SHFE.AU2608"], 600.0)
 
     def test_live_stream_yields_full_cached_prices_with_only_changed_symbols(self) -> None:
         universe = _one_strike_universe()
@@ -205,10 +205,10 @@ class LivePriceCacheTests(unittest.TestCase):
             stream.close()
 
         self.assertEqual(first.changed_symbols, set(first.prices))
-        self.assertEqual(second.changed_symbols, {"SHFE.au2608C600"})
-        self.assertEqual(second.prices["SHFE.au2608"], 600.0)
-        self.assertEqual(second.prices["SHFE.au2608P600"], 5.0)
-        self.assertEqual(second.prices["SHFE.au2608C600"], 6.0)
+        self.assertEqual(second.changed_symbols, {"SHFE.AU2608C600"})
+        self.assertEqual(second.prices["SHFE.AU2608"], 600.0)
+        self.assertEqual(second.prices["SHFE.AU2608P600"], 5.0)
+        self.assertEqual(second.prices["SHFE.AU2608C600"], 6.0)
         self.assertTrue(api.closed)
 
     def test_live_quote_subscription_uses_batches(self) -> None:
