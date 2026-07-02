@@ -44,7 +44,7 @@ class NotifierTests(unittest.TestCase):
                     key="cp_combo:SHFE.au2608:2026-8:K=600:SHFE.au2608C600:SHFE.au2608P600",
                     strategy_name="cp_combo",
                     value=-0.03559322,
-                    threshold=0.01,
+                    max_value=0.01,
                     symbols=("SHFE.au2608C600", "SHFE.au2608P600", "SHFE.au2608"),
                 )
             )
@@ -57,7 +57,7 @@ class NotifierTests(unittest.TestCase):
                     ),
                     strategy_name="abs_spread",
                     value=0.08,
-                    threshold=0.1,
+                    max_value=0.1,
                     symbols=("GFEX.lc2608-P-128000", "GFEX.lc2608-P-130000"),
                 )
             )
@@ -89,10 +89,10 @@ class NotifierTests(unittest.TestCase):
         self.assertIn("认购 + 认沽 + 标的", html_body)
         self.assertIn("认沽", html_body)
         self.assertIn("-0.03559322", plain_body)
-        self.assertIn("绝对偏离率大于阈值（0.01）", plain_body)
-        self.assertIn("绝对偏离率大于阈值（0.01）", html_body)
-        self.assertIn("价差比例小于阈值（0.1）", plain_body)
-        self.assertIn("价差比例小于阈值（0.1）", html_body)
+        self.assertIn("偏离率在预警范围内（(-inf, 0.01)）", plain_body)
+        self.assertIn("偏离率在预警范围内（(-inf, 0.01)）", html_body)
+        self.assertIn("价差比例在预警范围内（(-inf, 0.1)）", plain_body)
+        self.assertIn("价差比例在预警范围内（(-inf, 0.1)）", html_body)
 
     def test_email_formats_alert_rows_with_localized_strategy_names(self) -> None:
         email = EmailNotifier(
@@ -113,7 +113,7 @@ class NotifierTests(unittest.TestCase):
                     key="CP组合预警:SHFE.au2608:2026-8:K=600:SHFE.au2608C600:SHFE.au2608P600",
                     strategy_name="CP组合预警",
                     value=-0.03559322,
-                    threshold=0.01,
+                    max_value=0.01,
                     symbols=("SHFE.au2608C600", "SHFE.au2608P600", "SHFE.au2608"),
                 )
             )
@@ -126,7 +126,7 @@ class NotifierTests(unittest.TestCase):
                     ),
                     strategy_name="价差预警",
                     value=0.08,
-                    threshold=0.1,
+                    max_value=0.1,
                     symbols=("GFEX.lc2608-P-128000", "GFEX.lc2608-P-130000"),
                 )
             )
@@ -266,7 +266,8 @@ def _event(
     key: str = "strategy:key",
     strategy_name: str = "strategy",
     value: float = 1.0,
-    threshold: float = 0.1,
+    min_value: float = float("-inf"),
+    max_value: float = 0.1,
     symbols: tuple[str, ...] = ("A", "B"),
     message: str = "message",
 ) -> AlertEvent:
@@ -277,7 +278,8 @@ def _event(
             strategy_name=strategy_name,
             active=True,
             value=value,
-            threshold=threshold,
+            min_value=min_value,
+            max_value=max_value,
             symbols=symbols,
             message=message,
         ),

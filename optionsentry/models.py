@@ -135,7 +135,8 @@ class ConditionEvaluation:
     strategy_name: str
     active: bool
     value: float
-    threshold: float
+    min_value: float
+    max_value: float
     symbols: tuple[str, ...]
     message: str
 

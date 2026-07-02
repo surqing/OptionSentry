@@ -12,7 +12,8 @@ def evaluation(active: bool) -> ConditionEvaluation:
         strategy_name="strategy",
         active=active,
         value=1.0,
-        threshold=0.1,
+        min_value=float("-inf"),
+        max_value=0.1,
         symbols=("A", "B"),
         message="message",
     )

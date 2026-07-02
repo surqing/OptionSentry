@@ -63,7 +63,7 @@ class IncrementalStrategyTests(unittest.TestCase):
                 universe=universe,
             ),
         )
-        strategies: tuple[Strategy, ...] = (CPComboStrategy(threshold=0.01),)
+        strategies: tuple[Strategy, ...] = (CPComboStrategy(min_value=0.01, max_value=float("inf")),)
 
         self.assertEqual(
             _full_scan_events(strategies, snapshots),
@@ -80,7 +80,7 @@ class IncrementalStrategyTests(unittest.TestCase):
             "SHFE.au2608P620": 24.0,
         }
         snap = MarketSnapshot("t1", prices, set(prices), universe)
-        compiled = CPComboStrategy(threshold=0.01).compile(universe)
+        compiled = CPComboStrategy(min_value=0.01, max_value=float("inf")).compile(universe)
 
         option_evaluations = compiled.evaluate(snap, {"SHFE.au2608C600"})
         underlying_evaluations = compiled.evaluate(snap, {"SHFE.au2608"})
@@ -98,7 +98,7 @@ class IncrementalStrategyTests(unittest.TestCase):
             "SHFE.au2608P620": 2.0,
         }
         snap = MarketSnapshot("t1", prices, set(prices), universe)
-        compiled = AbsSpreadStrategy(threshold=0.1).compile(universe)
+        compiled = AbsSpreadStrategy(min_value=float("-inf"), max_value=0.1).compile(universe)
 
         option_evaluations = compiled.evaluate(snap, {"SHFE.au2608C600"})
         underlying_evaluations = compiled.evaluate(snap, {"SHFE.au2608"})
@@ -115,8 +115,8 @@ class IncrementalStrategyTests(unittest.TestCase):
             changed_symbol = "SHFE.au2608C800"
             snap = MarketSnapshot("bench", prices, {changed_symbol}, universe)
             compiled_strategies = (
-                CPComboStrategy(threshold=0.01).compile(universe),
-                AbsSpreadStrategy(threshold=0.1).compile(universe),
+                CPComboStrategy(min_value=0.01, max_value=float("inf")).compile(universe),
+                AbsSpreadStrategy(min_value=float("-inf"), max_value=0.1).compile(universe),
             )
 
             total_conditions = sum(strategy.condition_count for strategy in compiled_strategies)

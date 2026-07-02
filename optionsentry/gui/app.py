@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime
+import math
 import re
 import sys
 from pathlib import Path
@@ -983,11 +984,11 @@ class StrategyEvaluationTable(QGroupBox):
             return
         self._include_strategy_column = include_strategy
         if include_strategy:
-            headers = ("时间", "策略名", "值", "阈值", "合约")
-            widths = (165, 130, 100, 100, 360)
+            headers = ("时间", "策略名", "值", "预警范围", "合约")
+            widths = (165, 130, 100, 150, 360)
         else:
-            headers = ("时间", "值", "阈值", "合约")
-            widths = (165, 100, 100, 360)
+            headers = ("时间", "值", "预警范围", "合约")
+            widths = (165, 100, 150, 360)
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         _configure_resizable_columns(self.table, widths, stretch_last=True)
@@ -1001,7 +1002,10 @@ class StrategyEvaluationTable(QGroupBox):
         values: list[tuple[str, object | None]] = [
             (formatted_timestamp, formatted_timestamp),
             (f"{evaluation.value:.8f}", evaluation.value),
-            (f"{evaluation.threshold:.8f}", evaluation.threshold),
+            (
+                _format_warning_range(evaluation.min_value, evaluation.max_value),
+                (evaluation.min_value, evaluation.max_value),
+            ),
             (", ".join(evaluation.symbols), None),
         ]
         numeric_columns = (1, 2)
@@ -1086,7 +1090,7 @@ class ConfigEditor(QWidget):
         row = QHBoxLayout()
         add_button = QPushButton("添加")
         add_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
-        add_button.clicked.connect(lambda: self._add_strategy_row("cp_combo", 0.01, "", True))
+        add_button.clicked.connect(lambda: self._add_strategy_row("cp_combo", 0.01, math.inf, "", True))
         remove_button = QPushButton("删除")
         remove_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
         remove_button.clicked.connect(self._remove_strategy_row)
@@ -1094,8 +1098,8 @@ class ConfigEditor(QWidget):
         row.addWidget(remove_button)
         row.addStretch(1)
         layout.addLayout(row)
-        self.strategies = QTableWidget(0, 4)
-        self.strategies.setHorizontalHeaderLabels(("选中", "类型", "阈值", "名称"))
+        self.strategies = QTableWidget(0, 5)
+        self.strategies.setHorizontalHeaderLabels(("选中", "类型", "最小值", "最大值", "名称"))
         self.strategies.setAlternatingRowColors(True)
         self.strategies.setMinimumHeight(180)
         self.strategies.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -1103,7 +1107,7 @@ class ConfigEditor(QWidget):
         self.strategies.verticalHeader().setDefaultSectionSize(36)
         self.strategies.verticalHeader().setMinimumSectionSize(32)
         self.strategies.verticalHeader().setVisible(False)
-        _configure_resizable_columns(self.strategies, (70, 130, 110, 180))
+        _configure_resizable_columns(self.strategies, (70, 130, 110, 110, 180))
         self.strategies.itemChanged.connect(self._on_strategy_item_changed)
         layout.addWidget(self.strategies)
         self.content_layout.addWidget(box)
@@ -1203,7 +1207,8 @@ class ConfigEditor(QWidget):
         for strategy in config.strategies:
             self._add_strategy_row(
                 strategy.type,
-                strategy.threshold,
+                strategy.min_value,
+                strategy.max_value,
                 strategy.name or "",
                 strategy.selected,
                 restore_sort=False,
@@ -1317,9 +1322,15 @@ class ConfigEditor(QWidget):
         for row in range(self.strategies.rowCount()):
             selected = _table_checked(self.strategies, row, 0)
             strategy_type = _table_text(self.strategies, row, 1) or "cp_combo"
-            threshold = float(_table_text(self.strategies, row, 2) or "0")
-            name = _table_text(self.strategies, row, 3)
-            item = {"type": strategy_type, "threshold": threshold, "selected": selected}
+            min_value = float(_table_text(self.strategies, row, 2) or "-inf")
+            max_value = float(_table_text(self.strategies, row, 3) or "inf")
+            name = _table_text(self.strategies, row, 4)
+            item = {
+                "type": strategy_type,
+                "min_value": min_value,
+                "max_value": max_value,
+                "selected": selected,
+            }
             if name:
                 item["name"] = name
             rows.append(item)
@@ -1328,7 +1339,8 @@ class ConfigEditor(QWidget):
     def _add_strategy_row(
         self,
         strategy_type: str,
-        threshold: float,
+        min_value: float,
+        max_value: float,
         name: str,
         selected: bool = True,
         restore_sort: bool = True,
@@ -1345,8 +1357,9 @@ class ConfigEditor(QWidget):
         selected_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.strategies.setItem(row, 0, selected_item)
         self.strategies.setItem(row, 1, _table_item(strategy_type, sort_key=strategy_type.casefold()))
-        self.strategies.setItem(row, 2, _table_item(str(threshold), sort_key=threshold))
-        self.strategies.setItem(row, 3, _table_item(name, sort_key=name.casefold()))
+        self.strategies.setItem(row, 2, _table_item(_format_bound(min_value), sort_key=min_value))
+        self.strategies.setItem(row, 3, _table_item(_format_bound(max_value), sort_key=max_value))
+        self.strategies.setItem(row, 4, _table_item(name, sort_key=name.casefold()))
         if restore_sort:
             _restore_table_sort(self.strategies)
             _apply_table_filters(self.strategies)
@@ -1360,7 +1373,7 @@ class ConfigEditor(QWidget):
         sort_key: object | None
         if item.column() == 0:
             sort_key = 1 if item.checkState() == Qt.CheckState.Checked else 0
-        elif item.column() == 2:
+        elif item.column() in {2, 3}:
             try:
                 sort_key = float(item.text().strip())
             except ValueError:
@@ -1591,6 +1604,16 @@ def _format_status_timestamp(timestamp: str) -> str:
         fraction = value[20:21] if len(value) > 20 and value[19] == "." else "0"
         return f"{base}.{fraction}"
     return value
+
+
+def _format_warning_range(min_value: float, max_value: float) -> str:
+    return f"({_format_bound(min_value)}, {_format_bound(max_value)})"
+
+
+def _format_bound(value: float) -> str:
+    if math.isinf(value):
+        return "inf" if value > 0 else "-inf"
+    return f"{value:g}"
 
 
 def _split_csv(value: str) -> list[str]:

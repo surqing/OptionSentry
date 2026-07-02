@@ -24,13 +24,22 @@ quote_subscription_batch_size = 500
 
 [[strategies]]
 type = "cp_combo"
-threshold = 0.01
-name = "CP组合预警"
+min_value = 0.01
+max_value = inf
+name = "CP组合正向预警"
+selected = true
+
+[[strategies]]
+type = "cp_combo"
+min_value = -inf
+max_value = -0.01
+name = "CP组合负向预警"
 selected = true
 
 [[strategies]]
 type = "abs_spread"
-threshold = 0.1
+min_value = -inf
+max_value = 0.1
 name = "价差预警"
 selected = true
 

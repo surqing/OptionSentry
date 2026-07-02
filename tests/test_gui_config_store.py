@@ -35,8 +35,14 @@ class GuiConfigStoreTests(unittest.TestCase):
                         }
                     },
                     "strategies": [
-                        {"type": "cp_combo", "threshold": 0.02},
-                        {"type": "abs_spread", "threshold": 0.1, "name": "spread", "selected": False},
+                        {"type": "cp_combo", "min_value": 0.02, "max_value": float("inf")},
+                        {
+                            "type": "abs_spread",
+                            "min_value": float("-inf"),
+                            "max_value": 0.1,
+                            "name": "spread",
+                            "selected": False,
+                        },
                     ],
                 }
             )
@@ -47,6 +53,8 @@ class GuiConfigStoreTests(unittest.TestCase):
 
             self.assertIn("# keep this comment", text)
             self.assertIn('mode = "backtest"', text)
+            self.assertIn("min_value = 0.02", text)
+            self.assertIn("max_value = inf", text)
             self.assertIn("selected = false", text)
             self.assertEqual(saved.runtime.mode, "backtest")
             self.assertEqual(len(saved.strategies), 2)
@@ -58,7 +66,7 @@ class GuiConfigStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "config.toml"
             os.environ["TQSDK_PASSWORD"] = "super-secret"
-            config = parse_config({"strategies": [{"type": "cp_combo", "threshold": 0.01}]})
+            config = parse_config({"strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}]})
 
             save_config(path, config)
 
@@ -77,7 +85,7 @@ class GuiConfigStoreTests(unittest.TestCase):
                             "password": "saved-secret",
                         }
                     },
-                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
 
@@ -101,7 +109,7 @@ class GuiConfigStoreTests(unittest.TestCase):
                             "password_env": "MAIL_PASSWORD_ENV",
                         }
                     },
-                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
 
@@ -124,7 +132,7 @@ class GuiConfigStoreTests(unittest.TestCase):
                             "refresh_interval_seconds": 180,
                         }
                     },
-                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
 

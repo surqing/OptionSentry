@@ -55,7 +55,7 @@ class GuiRunnerAdapterTests(unittest.TestCase):
         alerts: list[AlertEvent] = []
         runner = AlertRunner(
             data_source=_FakeDataSource(universe, (snap,)),
-            strategies=(CPComboStrategy(threshold=0.01),),
+            strategies=(CPComboStrategy(min_value=0.01, max_value=float("inf")),),
             alert_engine=AlertEngine(alert_on_first_match=True),
             notifier=notifier,
             logger=_logger("tests.gui.callbacks"),
@@ -106,7 +106,7 @@ class GuiRunnerAdapterTests(unittest.TestCase):
 
         runner = AlertRunner(
             data_source=_FakeDataSource(universe, (first, second)),
-            strategies=(CPComboStrategy(threshold=0.01),),
+            strategies=(CPComboStrategy(min_value=0.01, max_value=float("inf")),),
             alert_engine=AlertEngine(alert_on_first_match=True),
             notifier=_Notifier([]),
             logger=_logger("tests.gui.stop"),

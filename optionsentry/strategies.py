@@ -57,7 +57,8 @@ class FullScanCompiledStrategy(CompiledStrategy):
 
 @dataclass
 class CPComboStrategy(Strategy):
-    threshold: float
+    min_value: float
+    max_value: float
     name: str = "cp_combo"
 
     def evaluate(self, snapshot: MarketSnapshot, universe: Universe) -> list[ConditionEvaluation]:
@@ -69,7 +70,8 @@ class CPComboStrategy(Strategy):
 
 @dataclass
 class AbsSpreadStrategy(Strategy):
-    threshold: float
+    min_value: float
+    max_value: float
     name: str = "abs_spread"
 
     def evaluate(self, snapshot: MarketSnapshot, universe: Universe) -> list[ConditionEvaluation]:
@@ -92,7 +94,8 @@ class _CPComboCondition:
 @dataclass
 class _CompiledCPComboStrategy(CompiledStrategy):
     name: str
-    threshold: float
+    min_value: float
+    max_value: float
     conditions: tuple[_CPComboCondition, ...]
     condition_ids_by_symbol: dict[str, set[int]]
 
@@ -121,7 +124,7 @@ class _CompiledCPComboStrategy(CompiledStrategy):
                 continue
             deviation = call_price - put_price + condition.strike - future_price
             value = deviation / future_price
-            active = abs(deviation) > self.threshold * future_price
+            active = _in_alert_range(value, self.min_value, self.max_value)
             symbols = (condition.call_symbol, condition.put_symbol, condition.underlying_symbol)
             evaluations.append(
                 ConditionEvaluation(
@@ -129,11 +132,12 @@ class _CompiledCPComboStrategy(CompiledStrategy):
                     strategy_name=self.name,
                     active=active,
                     value=value,
-                    threshold=self.threshold,
+                    min_value=self.min_value,
+                    max_value=self.max_value,
                     symbols=symbols,
                     message=(
                         f"{self.name} {condition.group_text} K={_format_float(condition.strike)} "
-                        f"value={value:.8f} threshold={self.threshold:.8f} "
+                        f"value={value:.8f} range={_format_range(self.min_value, self.max_value)} "
                         f"symbols={','.join(symbols)}"
                     ),
                 )
@@ -155,7 +159,8 @@ class _AbsSpreadCondition:
 @dataclass
 class _CompiledAbsSpreadStrategy(CompiledStrategy):
     name: str
-    threshold: float
+    min_value: float
+    max_value: float
     conditions: tuple[_AbsSpreadCondition, ...]
     condition_ids_by_symbol: dict[str, set[int]]
 
@@ -180,7 +185,7 @@ class _CompiledAbsSpreadStrategy(CompiledStrategy):
             if not (_valid_price(first_price) and _valid_price(second_price)):
                 continue
             value = abs(first_price - second_price) / abs(condition.first_strike - condition.second_strike)
-            active = value < self.threshold
+            active = _in_alert_range(value, self.min_value, self.max_value)
             symbols = (condition.first_symbol, condition.second_symbol)
             evaluations.append(
                 ConditionEvaluation(
@@ -188,12 +193,13 @@ class _CompiledAbsSpreadStrategy(CompiledStrategy):
                     strategy_name=self.name,
                     active=active,
                     value=value,
-                    threshold=self.threshold,
+                    min_value=self.min_value,
+                    max_value=self.max_value,
                     symbols=symbols,
                     message=(
                         f"{self.name} {condition.group_text} {condition.option_class} "
                         f"{_format_float(condition.first_strike)}-{_format_float(condition.second_strike)} "
-                        f"value={value:.8f} threshold={self.threshold:.8f} "
+                        f"value={value:.8f} range={_format_range(self.min_value, self.max_value)} "
                         f"symbols={','.join(symbols)}"
                     ),
                 )
@@ -204,9 +210,9 @@ class _CompiledAbsSpreadStrategy(CompiledStrategy):
 def build_strategy(config: StrategyConfig) -> Strategy:
     name = strategy_display_name(config)
     if config.type == "cp_combo":
-        return CPComboStrategy(threshold=config.threshold, name=name)
+        return CPComboStrategy(min_value=config.min_value, max_value=config.max_value, name=name)
     if config.type == "abs_spread":
-        return AbsSpreadStrategy(threshold=config.threshold, name=name)
+        return AbsSpreadStrategy(min_value=config.min_value, max_value=config.max_value, name=name)
     raise ValueError(f"Unsupported strategy type: {config.type}")
 
 
@@ -222,7 +228,8 @@ def _compile_cp_combo(strategy: CPComboStrategy, universe: Universe) -> _Compile
             condition = _CPComboCondition(
                 key=(
                     f"{strategy.name}:{group_key.as_text()}:"
-                    f"K={_format_float(strike)}:{call.symbol}:{put.symbol}"
+                    f"K={_format_float(strike)}:{call.symbol}:{put.symbol}:"
+                    f"R={_format_bound(strategy.min_value)}..{_format_bound(strategy.max_value)}"
                 ),
                 group_text=group_key.as_text(),
                 strike=strike,
@@ -237,7 +244,8 @@ def _compile_cp_combo(strategy: CPComboStrategy, universe: Universe) -> _Compile
             ))
     return _CompiledCPComboStrategy(
         name=strategy.name,
-        threshold=strategy.threshold,
+        min_value=strategy.min_value,
+        max_value=strategy.max_value,
         conditions=tuple(conditions),
         condition_ids_by_symbol=condition_ids_by_symbol,
     )
@@ -262,7 +270,8 @@ def _compile_abs_spread(strategy: AbsSpreadStrategy, universe: Universe) -> _Com
                 condition = _AbsSpreadCondition(
                     key=(
                         f"{strategy.name}:{group_key.as_text()}:{option_class}:"
-                        f"{first.symbol}:{second.symbol}"
+                        f"{first.symbol}:{second.symbol}:"
+                        f"R={_format_bound(strategy.min_value)}..{_format_bound(strategy.max_value)}"
                     ),
                     group_text=group_key.as_text(),
                     option_class=option_class,
@@ -274,7 +283,8 @@ def _compile_abs_spread(strategy: AbsSpreadStrategy, universe: Universe) -> _Com
                 _add_condition(conditions, condition_ids_by_symbol, condition, (first.symbol, second.symbol))
     return _CompiledAbsSpreadStrategy(
         name=strategy.name,
-        threshold=strategy.threshold,
+        min_value=strategy.min_value,
+        max_value=strategy.max_value,
         conditions=tuple(conditions),
         condition_ids_by_symbol=condition_ids_by_symbol,
     )
@@ -321,6 +331,20 @@ def _valid_price(value: float | None) -> bool:
     except (TypeError, ValueError):
         return False
     return math.isfinite(numeric)
+
+
+def _in_alert_range(value: float, min_value: float, max_value: float) -> bool:
+    return min_value < value < max_value
+
+
+def _format_range(min_value: float, max_value: float) -> str:
+    return f"({_format_bound(min_value)}, {_format_bound(max_value)})"
+
+
+def _format_bound(value: float) -> str:
+    if math.isinf(value):
+        return "inf" if value > 0 else "-inf"
+    return _format_float(value)
 
 
 def _format_float(value: float) -> str:

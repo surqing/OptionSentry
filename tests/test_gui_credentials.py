@@ -22,7 +22,7 @@ class GuiCredentialTests(unittest.TestCase):
                         "password_env": "PASS_ENV",
                     }
                 },
-                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
             }
         )
 
@@ -48,7 +48,7 @@ class GuiCredentialTests(unittest.TestCase):
                         "password_env": "PASS_ENV",
                     }
                 },
-                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
             }
         )
         environ = {"USER_ENV": "env-user", "PASS_ENV": "env-secret"}
@@ -71,7 +71,7 @@ class GuiCredentialTests(unittest.TestCase):
                         "password_env": "PASS_ENV",
                     }
                 },
-                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
             }
         )
         environ: dict[str, str] = {}
@@ -86,7 +86,7 @@ class GuiCredentialTests(unittest.TestCase):
         self.assertEqual(credentials.password_env, "PASS_ENV")
 
     def test_partially_filled_login_fails(self) -> None:
-        config = parse_config({"strategies": [{"type": "cp_combo", "threshold": 0.01}]})
+        config = parse_config({"strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}]})
 
         with self.assertRaises(ConfigError):
             resolve_tqsdk_credentials(config, "alice", "")
@@ -96,7 +96,7 @@ class GuiCredentialTests(unittest.TestCase):
             parse_config(
                 {
                     "datasource": {"tqsdk": {"username": "alice"}},
-                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
 
@@ -115,7 +115,8 @@ class GuiCredentialTests(unittest.TestCase):
                 'password_env = "PASS_ENV"\n\n'
                 "[[strategies]]\n"
                 'type = "cp_combo"\n'
-                "threshold = 0.01\n",
+                "min_value = 0.01\n"
+                "max_value = inf\n",
                 encoding="utf-8",
             )
             environ: dict[str, str] = {}

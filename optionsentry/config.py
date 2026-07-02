@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import tomllib
 from dataclasses import dataclass, field
@@ -57,7 +58,8 @@ class TqSdkConfig:
 @dataclass(frozen=True)
 class StrategyConfig:
     type: str
-    threshold: float
+    min_value: float
+    max_value: float
     name: str | None = None
     selected: bool = True
 
@@ -223,17 +225,67 @@ def _parse_strategies(data: list[dict[str, Any]]) -> tuple[StrategyConfig, ...]:
     for item in data:
         if "type" not in item:
             raise ConfigError("Each strategy requires a type.")
-        if "threshold" not in item:
-            raise ConfigError(f"Strategy {item.get('type')} requires threshold.")
-        strategies.append(
-            StrategyConfig(
-                type=str(item["type"]),
-                threshold=float(item["threshold"]),
+        strategy_type = str(item["type"])
+        strategies.extend(
+            _parse_strategy_item(
+                strategy_type,
+                item,
                 name=str(item["name"]) if item.get("name") is not None else None,
                 selected=bool(item.get("selected", True)),
             )
         )
     return tuple(strategies)
+
+
+def _parse_strategy_item(
+    strategy_type: str,
+    item: dict[str, Any],
+    name: str | None,
+    selected: bool,
+) -> tuple[StrategyConfig, ...]:
+    if "min_value" in item or "max_value" in item:
+        if "min_value" not in item or "max_value" not in item:
+            raise ConfigError(f"Strategy {strategy_type} requires both min_value and max_value.")
+        return (
+            StrategyConfig(
+                type=strategy_type,
+                min_value=_float_value(item["min_value"], f"Strategy {strategy_type} min_value"),
+                max_value=_float_value(item["max_value"], f"Strategy {strategy_type} max_value"),
+                name=name,
+                selected=selected,
+            ),
+        )
+    if "threshold" not in item:
+        raise ConfigError(f"Strategy {strategy_type} requires min_value and max_value.")
+    threshold = _float_value(item["threshold"], f"Strategy {strategy_type} threshold")
+    if threshold < 0:
+        raise ConfigError(f"Strategy threshold must be non-negative: {strategy_type}")
+    if strategy_type == "cp_combo":
+        return (
+            StrategyConfig(
+                type=strategy_type,
+                min_value=threshold,
+                max_value=math.inf,
+                name=name,
+                selected=selected,
+            ),
+            StrategyConfig(
+                type=strategy_type,
+                min_value=-math.inf,
+                max_value=-threshold,
+                name=name,
+                selected=selected,
+            ),
+        )
+    return (
+        StrategyConfig(
+            type=strategy_type,
+            min_value=-math.inf,
+            max_value=threshold,
+            name=name,
+            selected=selected,
+        ),
+    )
 
 
 def _parse_notifier(data: dict[str, Any], flat_email_data: dict[str, Any]) -> NotifierConfig:
@@ -326,8 +378,10 @@ def _validate_config(
     for strategy in strategies:
         if strategy.type not in {"cp_combo", "abs_spread"}:
             raise ConfigError(f"Unsupported strategy type: {strategy.type}")
-        if strategy.threshold < 0:
-            raise ConfigError(f"Strategy threshold must be non-negative: {strategy.type}")
+        if math.isnan(strategy.min_value) or math.isnan(strategy.max_value):
+            raise ConfigError(f"Strategy range cannot contain NaN: {strategy.type}")
+        if strategy.min_value >= strategy.max_value:
+            raise ConfigError(f"Strategy min_value must be less than max_value: {strategy.type}")
 
 
 def _tuple_of_str(value: Any) -> tuple[str, ...]:
@@ -352,6 +406,13 @@ def _integer_value(value: Any, name: str) -> int:
     if not number.is_integer():
         raise ConfigError(f"{name} must be an integer.")
     return int(number)
+
+
+def _float_value(value: Any, name: str) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{name} must be a number.") from exc
 
 
 def _optional_int(value: Any) -> int | None:

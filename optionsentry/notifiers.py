@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import smtplib
 import time
@@ -104,7 +105,7 @@ class _EmailAlertRow:
     structure: str
     strike: str
     value: str
-    threshold: str
+    warning_range: str
     trigger_condition: str
     symbols: str
 
@@ -192,7 +193,7 @@ def _email_plain_body(events: tuple[AlertEvent, ...]) -> str:
         "OptionSentry 预警汇总",
         _email_summary_text(events),
         "",
-        "触发时间 | 预警类型 | 监控对象 | 方向/结构 | 执行价 | 当前指标值 | 阈值 | 触发条件 | 相关合约",
+        "触发时间 | 预警类型 | 监控对象 | 方向/结构 | 执行价 | 当前指标值 | 预警范围 | 触发条件 | 相关合约",
         "--- | --- | --- | --- | --- | --- | --- | --- | ---",
     ]
     for row in rows:
@@ -205,7 +206,7 @@ def _email_plain_body(events: tuple[AlertEvent, ...]) -> str:
                     row.structure,
                     row.strike,
                     row.value,
-                    row.threshold,
+                    row.warning_range,
                     row.trigger_condition,
                     row.symbols,
                 )
@@ -237,7 +238,7 @@ def _email_html_body(events: tuple[AlertEvent, ...]) -> str:
             <th style="{_TH_STYLE}">方向/结构</th>
             <th style="{_TH_STYLE}">执行价</th>
             <th style="{_TH_STYLE}">当前指标值</th>
-            <th style="{_TH_STYLE}">阈值</th>
+            <th style="{_TH_STYLE}">预警范围</th>
             <th style="{_TH_STYLE}">触发条件</th>
             <th style="{_TH_STYLE}">相关合约</th>
           </tr>
@@ -283,7 +284,7 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
         monitor = f"{parsed.get('underlying', '')} {parsed.get('expiry', '')}".strip()
         strike = parsed.get("strike", "-")
         value = _format_number(evaluation.value)
-        threshold = _format_number(evaluation.threshold)
+        warning_range = _format_range(evaluation.min_value, evaluation.max_value)
         return _EmailAlertRow(
             timestamp=str(event.timestamp),
             strategy_label=strategy_label,
@@ -291,8 +292,8 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
             structure="认购 + 认沽 + 标的",
             strike=f"K={strike}" if strike else "-",
             value=value,
-            threshold=threshold,
-            trigger_condition=_threshold_condition("绝对偏离率", "大于", threshold),
+            warning_range=warning_range,
+            trigger_condition=_range_condition("偏离率", warning_range),
             symbols=", ".join(evaluation.symbols),
         )
     if parsed.get("strategy_type") == "abs_spread":
@@ -300,7 +301,7 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
         first_strike = parsed.get("first_strike", "")
         second_strike = parsed.get("second_strike", "")
         value = _format_number(evaluation.value)
-        threshold = _format_number(evaluation.threshold)
+        warning_range = _format_range(evaluation.min_value, evaluation.max_value)
         return _EmailAlertRow(
             timestamp=str(event.timestamp),
             strategy_label=strategy_label,
@@ -308,8 +309,8 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
             structure=direction,
             strike=f"{first_strike} / {second_strike}" if first_strike and second_strike else "-",
             value=value,
-            threshold=threshold,
-            trigger_condition=_threshold_condition("价差比例", "小于", threshold),
+            warning_range=warning_range,
+            trigger_condition=_range_condition("价差比例", warning_range),
             symbols=", ".join(evaluation.symbols),
         )
     return _EmailAlertRow(
@@ -319,8 +320,8 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
         structure="-",
         strike="-",
         value=_format_number(evaluation.value),
-        threshold=_format_number(evaluation.threshold),
-        trigger_condition=_generic_threshold_condition(evaluation.value, evaluation.threshold),
+        warning_range=_format_range(evaluation.min_value, evaluation.max_value),
+        trigger_condition=_generic_range_condition(evaluation.min_value, evaluation.max_value),
         symbols=", ".join(evaluation.symbols),
     )
 
@@ -334,24 +335,18 @@ def _email_table_row(index: int, row: _EmailAlertRow) -> str:
             <td style="{_TD_STYLE};white-space:nowrap;">{escape(row.structure)}</td>
             <td style="{_TD_STYLE};white-space:nowrap;">{escape(row.strike)}</td>
             <td style="{_TD_STYLE};text-align:right;white-space:nowrap;">{escape(row.value)}</td>
-            <td style="{_TD_STYLE};text-align:right;white-space:nowrap;">{escape(row.threshold)}</td>
+            <td style="{_TD_STYLE};text-align:right;white-space:nowrap;">{escape(row.warning_range)}</td>
             <td style="{_TD_STYLE};white-space:nowrap;">{escape(row.trigger_condition)}</td>
             <td style="{_TD_STYLE};word-break:break-all;">{escape(row.symbols)}</td>
           </tr>"""
 
 
-def _threshold_condition(metric_label: str, relation: str, threshold: str) -> str:
-    return f"{metric_label}{relation}阈值（{threshold}）"
+def _range_condition(metric_label: str, warning_range: str) -> str:
+    return f"{metric_label}在预警范围内（{warning_range}）"
 
 
-def _generic_threshold_condition(value: float, threshold: float) -> str:
-    if value > threshold:
-        relation = "大于"
-    elif value < threshold:
-        relation = "小于"
-    else:
-        relation = "等于"
-    return _threshold_condition("当前指标值", relation, _format_number(threshold))
+def _generic_range_condition(min_value: float, max_value: float) -> str:
+    return _range_condition("当前指标值", _format_range(min_value, max_value))
 
 
 def _strategy_label(strategy_name: str) -> str:
@@ -409,6 +404,16 @@ def _format_number(value: float) -> str:
     return f"{value:.8f}".rstrip("0").rstrip(".")
 
 
+def _format_range(min_value: float, max_value: float) -> str:
+    return f"({_format_bound(min_value)}, {_format_bound(max_value)})"
+
+
+def _format_bound(value: float) -> str:
+    if math.isinf(value):
+        return "inf" if value > 0 else "-inf"
+    return _format_number(value)
+
+
 _TH_STYLE = (
     "padding:10px 8px;border:1px solid #d8dee4;background:#f6f8fa;"
     "text-align:left;font-weight:600;color:#24292f;white-space:nowrap"
@@ -428,7 +433,8 @@ def _event_payload(
         "strategy": evaluation.strategy_name,
         "key": evaluation.key,
         "value": evaluation.value,
-        "threshold": evaluation.threshold,
+        "min_value": evaluation.min_value,
+        "max_value": evaluation.max_value,
         "symbols": list(evaluation.symbols),
         "message": evaluation.message,
         "metadata": metadata,

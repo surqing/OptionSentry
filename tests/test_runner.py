@@ -73,7 +73,7 @@ class RunnerTests(unittest.TestCase):
         logger.propagate = False
         runner = AlertRunner(
             data_source=data_source,
-            strategies=(CPComboStrategy(threshold=0.01),),
+            strategies=(CPComboStrategy(min_value=0.01, max_value=float("inf")),),
             alert_engine=AlertEngine(),
             notifier=CapturingNotifier([]),
             logger=logger,
@@ -110,7 +110,7 @@ class RunnerTests(unittest.TestCase):
         logger.propagate = False
         runner = AlertRunner(
             data_source=FakeDataSource(universe, (first, second)),
-            strategies=(CPComboStrategy(threshold=0.01),),
+            strategies=(CPComboStrategy(min_value=0.01, max_value=float("inf")),),
             alert_engine=AlertEngine(),
             notifier=notifier,
             logger=logger,
@@ -148,7 +148,7 @@ class RunnerTests(unittest.TestCase):
         logger.propagate = False
         runner = AlertRunner(
             data_source=FakeDataSource(universe, (first, second)),
-            strategies=(CPComboStrategy(threshold=0.01),),
+            strategies=(CPComboStrategy(min_value=0.01, max_value=float("inf")),),
             alert_engine=AlertEngine(),
             notifier=notifier,
             logger=logger,
@@ -186,7 +186,7 @@ class RunnerTests(unittest.TestCase):
         logger.propagate = False
         runner = AlertRunner(
             data_source=FakeDataSource(universe, (first, second)),
-            strategies=(CPComboStrategy(threshold=0.01),),
+            strategies=(CPComboStrategy(min_value=0.01, max_value=float("inf")),),
             alert_engine=AlertEngine(),
             notifier=FailingNotifier(),
             logger=logger,
@@ -223,7 +223,7 @@ class RunnerTests(unittest.TestCase):
         logger.propagate = False
         runner = AlertRunner(
             data_source=FakeDataSource(universe, (first, second)),
-            strategies=(CPComboStrategy(threshold=1000.0),),
+            strategies=(CPComboStrategy(min_value=1000.0, max_value=float("inf")),),
             alert_engine=AlertEngine(),
             notifier=CapturingNotifier([]),
             logger=logger,

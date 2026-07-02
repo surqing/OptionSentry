@@ -69,8 +69,8 @@ class GuiSmokeTests(unittest.TestCase):
         config = parse_config(
             {
                 "strategies": [
-                    {"type": "cp_combo", "threshold": 0.01},
-                    {"type": "abs_spread", "threshold": 0.1, "selected": False},
+                    {"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")},
+                    {"type": "abs_spread", "min_value": float("-inf"), "max_value": 0.1, "selected": False},
                 ]
             }
         )
@@ -106,7 +106,7 @@ class GuiSmokeTests(unittest.TestCase):
         main_window.config_editor.min_volume.setValue(100)
         self.assertEqual(main_window.config_editor.min_volume.text(), "100")
         self.assertEqual(main_window.config_editor.build_config().universe.min_volume, 100)
-        self.assertEqual(main_window.config_editor.strategies.columnCount(), 4)
+        self.assertEqual(main_window.config_editor.strategies.columnCount(), 5)
         self.assertGreaterEqual(main_window.config_editor.strategies.minimumHeight(), 180)
         self.assertEqual(
             main_window.config_editor.strategies.item(0, 0).checkState(),
@@ -274,8 +274,8 @@ class GuiSmokeTests(unittest.TestCase):
         config = parse_config(
             {
                 "strategies": [
-                    {"type": "cp_combo", "threshold": 0.01, "name": "CP组合预警"},
-                    {"type": "abs_spread", "threshold": 0.1, "name": "价差预警"},
+                    {"type": "cp_combo", "min_value": 0.01, "max_value": float("inf"), "name": "CP组合预警"},
+                    {"type": "abs_spread", "min_value": float("-inf"), "max_value": 0.1, "name": "价差预警"},
                 ]
             }
         )
@@ -331,8 +331,8 @@ class GuiSmokeTests(unittest.TestCase):
         config = parse_config(
             {
                 "strategies": [
-                    {"type": "cp_combo", "threshold": 0.01},
-                    {"type": "abs_spread", "threshold": 0.1},
+                    {"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")},
+                    {"type": "abs_spread", "min_value": float("-inf"), "max_value": 0.1},
                 ]
             }
         )
@@ -357,10 +357,10 @@ class GuiSmokeTests(unittest.TestCase):
             ("10.00000000", "2.00000000", "-1.00000000"),
         )
 
-        main_window.config_editor.strategies.horizontalHeader().sectionClicked.emit(2)
-        self.assertEqual(_column_texts(main_window.config_editor.strategies, 2), ("0.01", "0.1"))
-        main_window.config_editor.strategies.horizontalHeader().sectionClicked.emit(2)
-        self.assertEqual(_column_texts(main_window.config_editor.strategies, 2), ("0.1", "0.01"))
+        main_window.config_editor.strategies.horizontalHeader().sectionClicked.emit(3)
+        self.assertEqual(_column_texts(main_window.config_editor.strategies, 3), ("0.1", "inf"))
+        main_window.config_editor.strategies.horizontalHeader().sectionClicked.emit(3)
+        self.assertEqual(_column_texts(main_window.config_editor.strategies, 3), ("inf", "0.1"))
         app.processEvents()
         main_window.close()
 
@@ -373,7 +373,7 @@ class GuiSmokeTests(unittest.TestCase):
         from optionsentry.gui.credentials import CredentialResolution
 
         app = QApplication.instance() or QApplication([])
-        config = parse_config({"strategies": [{"type": "cp_combo", "threshold": 0.01}]})
+        config = parse_config({"strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}]})
         main_window = MainWindow(
             Path("config.toml"),
             config,
@@ -419,7 +419,7 @@ class GuiSmokeTests(unittest.TestCase):
                         "refresh_interval_seconds": 180,
                     }
                 },
-                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
             }
         )
         main_window = MainWindow(
@@ -464,7 +464,7 @@ class GuiSmokeTests(unittest.TestCase):
         from optionsentry.runner import RunnerCycle
 
         app = QApplication.instance() or QApplication([])
-        config = parse_config({"strategies": [{"type": "cp_combo", "threshold": 0.01}]})
+        config = parse_config({"strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}]})
         main_window = MainWindow(
             Path("config.toml"),
             config,
@@ -524,7 +524,7 @@ class GuiSmokeTests(unittest.TestCase):
         config = parse_config(
             {
                 "gui": {"active_alerts": {"auto_refresh": False}},
-                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
             }
         )
         main_window = MainWindow(
@@ -577,10 +577,11 @@ class GuiSmokeTests(unittest.TestCase):
             config_path.write_text(
                 "[[strategies]]\n"
                 'type = "cp_combo"\n'
-                "threshold = 0.01\n",
+                "min_value = 0.01\n"
+                "max_value = inf\n",
                 encoding="utf-8",
             )
-            config = parse_config({"strategies": [{"type": "cp_combo", "threshold": 0.01}]})
+            config = parse_config({"strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}]})
             window = LoginWindow()
             window.config_path.setText(str(config_path))
             window.username.setText("alice")
@@ -625,8 +626,8 @@ class GuiSmokeTests(unittest.TestCase):
         config = parse_config(
             {
                 "strategies": [
-                    {"type": "cp_combo", "threshold": 0.01},
-                    {"type": "abs_spread", "threshold": 0.1, "selected": False},
+                    {"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")},
+                    {"type": "abs_spread", "min_value": float("-inf"), "max_value": 0.1, "selected": False},
                 ]
             }
         )
@@ -665,7 +666,8 @@ class GuiSmokeTests(unittest.TestCase):
                 'price_basis = "last"\n\n'
                 "[[strategies]]\n"
                 'type = "cp_combo"\n'
-                "threshold = 0.01\n",
+                "min_value = 0.01\n"
+                "max_value = inf\n",
                 encoding="utf-8",
             )
             main_window._reload_config()
@@ -698,7 +700,8 @@ def _evaluation(
         strategy_name=strategy_name,
         active=active,
         value=value,
-        threshold=0.1,
+        min_value=float("-inf"),
+        max_value=0.1,
         symbols=("SHFE.au2608C600", "SHFE.au2608P600", "SHFE.au2608"),
         message=f"message {suffix}",
     )
@@ -712,7 +715,8 @@ def _cp_evaluation(value: float, strike: int = 600, strategy_name: str = "CP组�
         strategy_name=strategy_name,
         active=True,
         value=value,
-        threshold=0.01,
+        min_value=0.01,
+        max_value=float("inf"),
         symbols=(call_symbol, put_symbol, "SHFE.au2608"),
         message=f"message cp {strike}",
     )

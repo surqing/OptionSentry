@@ -115,7 +115,7 @@ class UniverseTests(unittest.TestCase):
             {
                 "runtime": {},
                 "universe": {"min_volume": 1, "min_open_interest": 2},
-                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
             }
         )
 
@@ -129,7 +129,7 @@ class UniverseTests(unittest.TestCase):
             {
                 "runtime": {},
                 "universe": {"min_volume": 100.0, "min_open_interest": 200.0},
-                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
             }
         )
         self.assertEqual(legacy_config.universe.min_volume, 100)
@@ -140,7 +140,7 @@ class UniverseTests(unittest.TestCase):
                 {
                     "runtime": {},
                     "universe": {"min_volume": -1},
-                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
         with self.assertRaises(ConfigError):
@@ -148,7 +148,7 @@ class UniverseTests(unittest.TestCase):
                 {
                     "runtime": {},
                     "universe": {"min_volume": 1.5},
-                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
         with self.assertRaises(ConfigError):
@@ -156,7 +156,7 @@ class UniverseTests(unittest.TestCase):
                 {
                     "runtime": {},
                     "logging": {"cycle_summary_interval_seconds": -1},
-                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
         with self.assertRaises(ConfigError):
@@ -164,7 +164,7 @@ class UniverseTests(unittest.TestCase):
                 {
                     "runtime": {},
                     "gui": {"active_alerts": {"refresh_interval_seconds": 11}},
-                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
 
@@ -178,7 +178,7 @@ class UniverseTests(unittest.TestCase):
                     "symbols": ["shfe.au2608c600"],
                     "exchange_ids": ["shfe"],
                 },
-                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
             }
         )
 
@@ -195,7 +195,7 @@ class UniverseTests(unittest.TestCase):
                         "refresh_interval_seconds": 180,
                     }
                 },
-                "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
             }
         )
 
