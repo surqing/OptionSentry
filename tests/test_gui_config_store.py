@@ -146,6 +146,53 @@ class GuiConfigStoreTests(unittest.TestCase):
             self.assertFalse(saved.gui.active_alerts.auto_refresh)
             self.assertEqual(saved.gui.active_alerts.refresh_interval_seconds, 180)
 
+    def test_save_config_writes_notifier_channels_and_removes_legacy_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "config.toml"
+            path.write_text(
+                "[notifier]\n"
+                'kind = "console"\n\n'
+                "[[strategies]]\n"
+                'type = "cp_combo"\n'
+                "threshold = 0.01\n",
+                encoding="utf-8",
+            )
+            config = parse_config(
+                {
+                    "notifier": {
+                        "kind": "console",
+                        "channels": {
+                            "popup": True,
+                            "sound": True,
+                            "file": False,
+                            "email": False,
+                        },
+                        "popup": {"duration_seconds": 5},
+                        "sound": {"duration_seconds": 7},
+                    },
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
+                }
+            )
+
+            save_config(path, config)
+
+            text = path.read_text(encoding="utf-8")
+            saved = parse_config(config_to_data(config))
+            self.assertNotIn("kind =", text)
+            self.assertIn("[notifier.channels]", text)
+            self.assertIn("popup = true", text)
+            self.assertIn("sound = true", text)
+            self.assertIn("file = false", text)
+            self.assertIn("email = false", text)
+            self.assertIn("[notifier.popup]", text)
+            self.assertIn("duration_seconds = 5", text)
+            self.assertIn("[notifier.sound]", text)
+            self.assertIn("duration_seconds = 7", text)
+            self.assertTrue(saved.notifier.channels.popup)
+            self.assertTrue(saved.notifier.channels.sound)
+            self.assertFalse(saved.notifier.channels.file)
+            self.assertFalse(saved.notifier.channels.email)
+
 
 if __name__ == "__main__":
     unittest.main()

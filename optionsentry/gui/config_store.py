@@ -19,7 +19,10 @@ def config_to_data(config: AppConfig) -> dict[str, Any]:
         "strategies": [asdict(strategy) for strategy in config.strategies],
         "backtest": _date_strings(asdict(config.backtest)),
         "notifier": {
-            "kind": config.notifier.kind,
+            "kind": None,
+            "channels": asdict(config.notifier.channels),
+            "popup": asdict(config.notifier.popup),
+            "sound": asdict(config.notifier.sound),
             "alert_log_path": config.notifier.alert_log_path,
             "email": email,
         },

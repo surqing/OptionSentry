@@ -52,10 +52,21 @@ initial_price_timeout_seconds = 120
 subscription_batch_size = 50
 
 [notifier]
-# live defaults to email, backtest defaults to console.
-# kind = "console"
+# If [notifier.channels] is omitted, live defaults to email+file and backtest defaults to file.
 # Runtime mode is inserted as a subdirectory: logs/live/alerts.jsonl or logs/backtest/alerts.jsonl.
 alert_log_path = "logs/alerts.jsonl"
+
+[notifier.channels]
+popup = false
+sound = false
+file = true
+email = true
+
+[notifier.popup]
+duration_seconds = 2
+
+[notifier.sound]
+duration_seconds = 2
 
 [notifier.email]
 smtp_host = "smtp.example.com"

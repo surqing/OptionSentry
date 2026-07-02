@@ -34,6 +34,15 @@ class ConsoleNotifier:
 
 
 @dataclass
+class NoOpNotifier:
+    def notify(self, event: AlertEvent) -> None:
+        return None
+
+    def flush(self, force: bool = False) -> None:
+        return None
+
+
+@dataclass
 class EmailNotifier:
     config: EmailConfig
     _disabled_until: float = field(default=0.0, init=False)
@@ -163,18 +172,19 @@ class CompositeNotifier:
 
 
 def build_notifier(config: AppConfig) -> Notifier:
-    kind = config.notifier.kind or ("email" if config.runtime.mode == "live" else "console")
-    if kind == "email":
-        primary: Notifier = EmailNotifier(config.notifier.email)
-    elif kind == "console":
-        primary = ConsoleNotifier()
-    else:
-        raise ConfigError(f"Unsupported notifier kind: {kind}")
-    recorder = JsonlAlertRecorder(
-        mode_scoped_file(Path(config.notifier.alert_log_path), config.runtime.mode),
-        metadata={"mode": config.runtime.mode},
-    )
-    return CompositeNotifier((primary, recorder))
+    notifiers: list[Notifier] = []
+    if config.notifier.channels.email:
+        notifiers.append(EmailNotifier(config.notifier.email))
+    if config.notifier.channels.file:
+        notifiers.append(
+            JsonlAlertRecorder(
+                mode_scoped_file(Path(config.notifier.alert_log_path), config.runtime.mode),
+                metadata={"mode": config.runtime.mode},
+            )
+        )
+    if not notifiers:
+        return NoOpNotifier()
+    return CompositeNotifier(tuple(notifiers))
 
 
 def _event_text(event: AlertEvent) -> str:

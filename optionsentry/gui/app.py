@@ -5,6 +5,7 @@ from datetime import datetime
 import math
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -68,6 +69,7 @@ FILTERS_PROPERTY = "optionsentry_filters"
 SORT_ROLE = Qt.ItemDataRole.UserRole
 TOAST_DURATION_MS = 1500
 TOAST_FADE_MS = 150
+ALERT_SOUND_BEEP_INTERVAL_MS = 700
 CP_NEGATIVE_VALUE_COLOR = "#d8ecdf"
 CP_POSITIVE_VALUE_COLOR = "#f1d7d2"
 
@@ -108,6 +110,7 @@ class ToastPopup(QWidget):
             | Qt.WindowType.WindowStaysOnTopHint,
         )
         self._duration_ms = duration_ms
+        self._last_duration_ms = duration_ms
         self._fade_ms = min(TOAST_FADE_MS, max(duration_ms // 2, 0))
         self._sequence = 0
         self.setObjectName("toastPopup")
@@ -142,7 +145,12 @@ class ToastPopup(QWidget):
         self._fade_out.setEasingCurve(QEasingCurve.Type.InCubic)
         self._fade_out.finished.connect(self.hide)
 
-    def show_message(self, message: str) -> None:
+    def show_message(self, message: str, duration_ms: int | None = None) -> None:
+        message_duration_ms = max(0, int(duration_ms if duration_ms is not None else self._duration_ms))
+        self._last_duration_ms = message_duration_ms
+        fade_ms = min(TOAST_FADE_MS, max(message_duration_ms // 2, 0))
+        self._fade_in.setDuration(fade_ms)
+        self._fade_out.setDuration(fade_ms)
         self._sequence += 1
         sequence = self._sequence
         self._fade_in.stop()
@@ -157,15 +165,21 @@ class ToastPopup(QWidget):
         self._opacity.setOpacity(0.0)
         self.show()
         self.raise_()
-        self._fade_in.finished.connect(lambda sequence=sequence: self._hold_then_fade(sequence))
+        self._fade_in.finished.connect(
+            lambda sequence=sequence, duration_ms=message_duration_ms, fade_ms=fade_ms: self._hold_then_fade(
+                sequence,
+                duration_ms,
+                fade_ms,
+            )
+        )
         self._fade_in.start()
 
-    def _hold_then_fade(self, sequence: int) -> None:
+    def _hold_then_fade(self, sequence: int, duration_ms: int, fade_ms: int) -> None:
         try:
             self._fade_in.finished.disconnect()
         except TypeError:
             pass
-        hold_ms = max(0, self._duration_ms - (self._fade_ms * 2))
+        hold_ms = max(0, duration_ms - (fade_ms * 2))
         QTimer.singleShot(hold_ms, lambda: self._fade_out_if_current(sequence))
 
     def _fade_out_if_current(self, sequence: int) -> None:
@@ -422,6 +436,7 @@ class MainWindow(QMainWindow):
         self.credentials = credentials
         self._monitor_thread: QThread | None = None
         self._monitor_worker: MonitorWorker | None = None
+        self._monitor_config: AppConfig | None = None
         self._running = False
         self._active_records_by_key: dict[str, _EvaluationRecord] = {}
         self._latest_active_cycle_count = 0
@@ -433,6 +448,9 @@ class MainWindow(QMainWindow):
         self._manual_active_refresh_timeout = QTimer(self)
         self._manual_active_refresh_timeout.setSingleShot(True)
         self._manual_active_refresh_timeout.timeout.connect(self._on_active_manual_refresh_timeout)
+        self._alert_sound_until = 0.0
+        self._alert_sound_timer = QTimer(self)
+        self._alert_sound_timer.timeout.connect(self._on_alert_sound_timer)
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon())
         self.resize(1180, 760)
@@ -556,10 +574,12 @@ class MainWindow(QMainWindow):
         if self._running:
             return
         try:
-            self.config = self._config_with_active_refresh(self.config_editor.build_config())
+            monitor_config = self._config_with_active_refresh(self.config_editor.build_config())
         except Exception as exc:
             QMessageBox.warning(self, "配置错误", str(exc))
             return
+        self.config = monitor_config
+        self._monitor_config = monitor_config
         self._sync_config_summary(self.config)
         self.alert_view.clear_records()
         self._reset_active_records()
@@ -567,7 +587,7 @@ class MainWindow(QMainWindow):
         self._append_log("Starting monitor")
         self._set_running(True)
         self._monitor_thread = QThread(self)
-        self._monitor_worker = MonitorWorker(self.config)
+        self._monitor_worker = MonitorWorker(monitor_config)
         self._monitor_worker.moveToThread(self._monitor_thread)
         self._monitor_thread.started.connect(self._monitor_worker.run)
         self._monitor_worker.status.connect(lambda status: self._set_status("status", status))
@@ -594,6 +614,8 @@ class MainWindow(QMainWindow):
         self._append_log(f"Monitor stopped, alerts={alert_count}")
         self._monitor_worker = None
         self._monitor_thread = None
+        self._monitor_config = None
+        self._stop_alert_sound()
         self._cancel_active_manual_refresh()
         self._set_running(False)
 
@@ -624,6 +646,33 @@ class MainWindow(QMainWindow):
     def _on_alert(self, event: AlertEvent) -> None:
         follow_latest = _table_is_at_bottom(self.alert_table)
         self.alert_view.append_record(event.timestamp, event.evaluation, scroll_to_bottom=follow_latest)
+        self._emit_local_alert(event)
+
+    def _emit_local_alert(self, event: AlertEvent) -> None:
+        config = self._monitor_config or self.config
+        if config.notifier.channels.popup:
+            self._toast.show_message(
+                event.evaluation.message,
+                duration_ms=config.notifier.popup.duration_seconds * 1000,
+            )
+        if config.notifier.channels.sound:
+            self._start_alert_sound(config.notifier.sound.duration_seconds)
+
+    def _start_alert_sound(self, duration_seconds: int) -> None:
+        now = time.monotonic()
+        self._alert_sound_until = max(self._alert_sound_until, now + duration_seconds)
+        QApplication.beep()
+        self._alert_sound_timer.start(ALERT_SOUND_BEEP_INTERVAL_MS)
+
+    def _on_alert_sound_timer(self) -> None:
+        if time.monotonic() >= self._alert_sound_until:
+            self._stop_alert_sound()
+            return
+        QApplication.beep()
+
+    def _stop_alert_sound(self) -> None:
+        self._alert_sound_timer.stop()
+        self._alert_sound_until = 0.0
 
     def _cache_active_records(self, cycle: RunnerCycle) -> None:
         for evaluation in cycle.evaluations:
@@ -1145,8 +1194,18 @@ class ConfigEditor(QWidget):
     def _build_notifier(self) -> None:
         box = QGroupBox("通知")
         form = QFormLayout(box)
-        self.notifier_kind = NoWheelComboBox()
-        self.notifier_kind.addItems(("", "console", "email"))
+        self.notify_popup = QCheckBox("弹窗")
+        self.notify_sound = QCheckBox("声音")
+        self.notify_file = QCheckBox("文件")
+        self.notify_email = QCheckBox("邮件")
+        channel_row = QHBoxLayout()
+        channel_row.addWidget(self.notify_popup)
+        channel_row.addWidget(self.notify_sound)
+        channel_row.addWidget(self.notify_file)
+        channel_row.addWidget(self.notify_email)
+        channel_row.addStretch(1)
+        self.popup_duration_seconds = _spin(1, 3600)
+        self.sound_duration_seconds = _spin(1, 3600)
         self.alert_log_path = QLineEdit()
         self.smtp_host = QLineEdit()
         self.smtp_port = _spin(1, 65535)
@@ -1160,7 +1219,9 @@ class ConfigEditor(QWidget):
         self.to_addrs = QLineEdit()
         self.use_tls = QCheckBox()
         self.failure_backoff_seconds = _spin(0, 86400)
-        form.addRow("通知方式", self.notifier_kind)
+        form.addRow("通知方式", channel_row)
+        form.addRow("弹窗持续秒数", self.popup_duration_seconds)
+        form.addRow("声音持续秒数", self.sound_duration_seconds)
         form.addRow("预警日志", self.alert_log_path)
         form.addRow("SMTP主机", self.smtp_host)
         form.addRow("SMTP端口", self.smtp_port)
@@ -1233,7 +1294,12 @@ class ConfigEditor(QWidget):
         self.password_env.setText(config.tqsdk.password_env)
         self.symbol_info_batch_size.setValue(config.tqsdk.symbol_info_batch_size)
         self.quote_subscription_batch_size.setValue(config.tqsdk.quote_subscription_batch_size)
-        self.notifier_kind.setCurrentText(config.notifier.kind or "")
+        self.notify_popup.setChecked(config.notifier.channels.popup)
+        self.notify_sound.setChecked(config.notifier.channels.sound)
+        self.notify_file.setChecked(config.notifier.channels.file)
+        self.notify_email.setChecked(config.notifier.channels.email)
+        self.popup_duration_seconds.setValue(config.notifier.popup.duration_seconds)
+        self.sound_duration_seconds.setValue(config.notifier.sound.duration_seconds)
         self.alert_log_path.setText(config.notifier.alert_log_path)
         self.smtp_host.setText(config.notifier.email.smtp_host or "")
         self.smtp_port.setValue(config.notifier.email.smtp_port)
@@ -1291,7 +1357,18 @@ class ConfigEditor(QWidget):
                 "subscription_batch_size": self.subscription_batch_size.value(),
             },
             "notifier": {
-                "kind": self.notifier_kind.currentText() or None,
+                "channels": {
+                    "popup": self.notify_popup.isChecked(),
+                    "sound": self.notify_sound.isChecked(),
+                    "file": self.notify_file.isChecked(),
+                    "email": self.notify_email.isChecked(),
+                },
+                "popup": {
+                    "duration_seconds": self.popup_duration_seconds.value(),
+                },
+                "sound": {
+                    "duration_seconds": self.sound_duration_seconds.value(),
+                },
                 "alert_log_path": self.alert_log_path.text().strip() or "logs/alerts.jsonl",
                 "email": {
                     "smtp_host": self.smtp_host.text().strip() or None,

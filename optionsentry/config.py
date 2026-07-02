@@ -92,8 +92,29 @@ class EmailConfig:
 
 
 @dataclass(frozen=True)
+class NotifierChannelsConfig:
+    popup: bool = False
+    sound: bool = False
+    file: bool = True
+    email: bool = True
+
+
+@dataclass(frozen=True)
+class PopupConfig:
+    duration_seconds: int = 2
+
+
+@dataclass(frozen=True)
+class SoundConfig:
+    duration_seconds: int = 2
+
+
+@dataclass(frozen=True)
 class NotifierConfig:
     kind: str | None = None
+    channels: NotifierChannelsConfig = field(default_factory=NotifierChannelsConfig)
+    popup: PopupConfig = field(default_factory=PopupConfig)
+    sound: SoundConfig = field(default_factory=SoundConfig)
     email: EmailConfig = field(default_factory=EmailConfig)
     alert_log_path: str = "logs/alerts.jsonl"
 
@@ -151,10 +172,10 @@ def parse_config(data: dict[str, Any]) -> AppConfig:
     datasource = data.get("datasource", {})
     tqsdk = _parse_tqsdk(datasource.get("tqsdk", {}))
     strategies = _parse_strategies(data.get("strategies", []))
-    notifier = _parse_notifier(data.get("notifier", {}), data.get("notifier.email", {}))
+    notifier = _parse_notifier(data.get("notifier", {}), data.get("notifier.email", {}), runtime.mode)
     logging_config = _parse_logging(data.get("logging", {}))
     gui = _parse_gui(data.get("gui", {}))
-    _validate_config(runtime, universe, backtest, strategies, logging_config, gui)
+    _validate_config(runtime, universe, backtest, strategies, notifier, logging_config, gui)
     return AppConfig(
         runtime=runtime,
         universe=universe,
@@ -288,7 +309,15 @@ def _parse_strategy_item(
     )
 
 
-def _parse_notifier(data: dict[str, Any], flat_email_data: dict[str, Any]) -> NotifierConfig:
+def _parse_notifier(
+    data: dict[str, Any],
+    flat_email_data: dict[str, Any],
+    runtime_mode: str,
+) -> NotifierConfig:
+    legacy_kind = str(data["kind"]) if data.get("kind") else None
+    channels = _parse_notifier_channels(data.get("channels"), legacy_kind, runtime_mode)
+    popup_data = data.get("popup", {}) or {}
+    sound_data = data.get("sound", {}) or {}
     email_data = data.get("email", flat_email_data) or {}
     alert_interval_seconds = int(email_data.get("alert_interval_seconds", 60))
     if alert_interval_seconds < 0:
@@ -307,10 +336,35 @@ def _parse_notifier(data: dict[str, Any], flat_email_data: dict[str, Any]) -> No
         failure_backoff_seconds=int(email_data.get("failure_backoff_seconds", 300)),
     )
     return NotifierConfig(
-        kind=str(data["kind"]) if data.get("kind") else None,
+        kind=legacy_kind,
+        channels=channels,
+        popup=PopupConfig(duration_seconds=int(popup_data.get("duration_seconds", 2))),
+        sound=SoundConfig(duration_seconds=int(sound_data.get("duration_seconds", 2))),
         email=email,
         alert_log_path=str(data.get("alert_log_path", "logs/alerts.jsonl")),
     )
+
+
+def _parse_notifier_channels(
+    data: dict[str, Any] | None,
+    legacy_kind: str | None,
+    runtime_mode: str,
+) -> NotifierChannelsConfig:
+    default_email = runtime_mode == "live"
+    if data is not None:
+        return NotifierChannelsConfig(
+            popup=bool(data.get("popup", False)),
+            sound=bool(data.get("sound", False)),
+            file=bool(data.get("file", True)),
+            email=bool(data.get("email", default_email)),
+        )
+    if legacy_kind is None:
+        return NotifierChannelsConfig(file=True, email=default_email)
+    if legacy_kind == "email":
+        return NotifierChannelsConfig(file=True, email=True)
+    if legacy_kind == "console":
+        return NotifierChannelsConfig(file=True, email=False)
+    raise ConfigError(f"Unsupported notifier kind: {legacy_kind}")
 
 
 def _parse_logging(data: dict[str, Any]) -> LoggingConfig:
@@ -339,6 +393,7 @@ def _validate_config(
     universe: UniverseConfig,
     backtest: BacktestConfig,
     strategies: tuple[StrategyConfig, ...],
+    notifier: NotifierConfig,
     logging_config: LoggingConfig,
     gui: GuiConfig,
 ) -> None:
@@ -368,6 +423,10 @@ def _validate_config(
         raise ConfigError("logging.backup_count must be non-negative.")
     if logging_config.cycle_summary_interval_seconds < 0:
         raise ConfigError("logging.cycle_summary_interval_seconds must be non-negative.")
+    if not 1 <= notifier.popup.duration_seconds <= 3600:
+        raise ConfigError("notifier.popup.duration_seconds must be between 1 and 3600.")
+    if not 1 <= notifier.sound.duration_seconds <= 3600:
+        raise ConfigError("notifier.sound.duration_seconds must be between 1 and 3600.")
     if gui.active_alerts.refresh_interval_seconds not in ACTIVE_ALERT_REFRESH_INTERVALS:
         raise ConfigError(
             "gui.active_alerts.refresh_interval_seconds must be one of "

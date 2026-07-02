@@ -202,11 +202,86 @@ class UniverseTests(unittest.TestCase):
         self.assertFalse(config.gui.active_alerts.auto_refresh)
         self.assertEqual(config.gui.active_alerts.refresh_interval_seconds, 180)
 
+    def test_config_parses_notifier_channels_and_legacy_defaults(self) -> None:
+        strategies = [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}]
+
+        live_config = parse_config({"strategies": strategies})
+
+        self.assertFalse(live_config.notifier.channels.popup)
+        self.assertFalse(live_config.notifier.channels.sound)
+        self.assertTrue(live_config.notifier.channels.file)
+        self.assertTrue(live_config.notifier.channels.email)
+        self.assertEqual(live_config.notifier.popup.duration_seconds, 2)
+        self.assertEqual(live_config.notifier.sound.duration_seconds, 2)
+
+        backtest_config = parse_config(
+            {
+                "runtime": {"mode": "backtest"},
+                "backtest": {"start_dt": "2026-01-02", "end_dt": "2026-01-05"},
+                "strategies": strategies,
+            }
+        )
+        self.assertTrue(backtest_config.notifier.channels.file)
+        self.assertFalse(backtest_config.notifier.channels.email)
+
+        legacy_console_config = parse_config(
+            {
+                "notifier": {"kind": "console"},
+                "strategies": strategies,
+            }
+        )
+        self.assertTrue(legacy_console_config.notifier.channels.file)
+        self.assertFalse(legacy_console_config.notifier.channels.email)
+
+        explicit_config = parse_config(
+            {
+                "notifier": {
+                    "kind": "email",
+                    "channels": {
+                        "popup": True,
+                        "sound": True,
+                        "file": False,
+                        "email": False,
+                    },
+                    "popup": {"duration_seconds": 5},
+                    "sound": {"duration_seconds": 7},
+                },
+                "strategies": strategies,
+            }
+        )
+        self.assertTrue(explicit_config.notifier.channels.popup)
+        self.assertTrue(explicit_config.notifier.channels.sound)
+        self.assertFalse(explicit_config.notifier.channels.file)
+        self.assertFalse(explicit_config.notifier.channels.email)
+        self.assertEqual(explicit_config.notifier.popup.duration_seconds, 5)
+        self.assertEqual(explicit_config.notifier.sound.duration_seconds, 7)
+
+        with self.assertRaises(ConfigError):
+            parse_config(
+                {
+                    "notifier": {"popup": {"duration_seconds": 0}},
+                    "strategies": strategies,
+                }
+            )
+        with self.assertRaises(ConfigError):
+            parse_config(
+                {
+                    "notifier": {"sound": {"duration_seconds": 3601}},
+                    "strategies": strategies,
+                }
+            )
+
     def test_example_config_parses_with_gui_defaults(self) -> None:
         config = load_config(Path(__file__).resolve().parents[1] / "config.example.toml")
 
         self.assertTrue(config.gui.active_alerts.auto_refresh)
         self.assertEqual(config.gui.active_alerts.refresh_interval_seconds, 10)
+        self.assertFalse(config.notifier.channels.popup)
+        self.assertFalse(config.notifier.channels.sound)
+        self.assertTrue(config.notifier.channels.file)
+        self.assertTrue(config.notifier.channels.email)
+        self.assertEqual(config.notifier.popup.duration_seconds, 2)
+        self.assertEqual(config.notifier.sound.duration_seconds, 2)
 
     def test_live_universe_filters_liquidity_from_metadata(self) -> None:
         api = _FakeDiscoveryApi(_liquidity_rows(include_metrics=True))

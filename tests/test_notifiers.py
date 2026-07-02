@@ -16,6 +16,7 @@ from optionsentry.notifiers import (
     CompositeNotifier,
     EmailNotifier,
     JsonlAlertRecorder,
+    NoOpNotifier,
     NotificationError,
     build_notifier,
 )
@@ -213,6 +214,74 @@ class NotifierTests(unittest.TestCase):
             recorder_path = Path(tmpdir) / "backtest" / "alerts.jsonl"
             payload = json.loads(recorder_path.read_text(encoding="utf-8").splitlines()[0])
             self.assertEqual(payload["metadata"]["mode"], "backtest")
+
+    def test_build_notifier_respects_file_and_email_channels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            disabled_config = parse_config(
+                {
+                    "notifier": {
+                        "channels": {
+                            "popup": False,
+                            "sound": False,
+                            "file": False,
+                            "email": False,
+                        },
+                        "alert_log_path": str(Path(tmpdir) / "disabled.jsonl"),
+                    },
+                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                }
+            )
+            disabled_notifier = build_notifier(disabled_config)
+
+            disabled_notifier.notify(_event())
+
+            self.assertIsInstance(disabled_notifier, NoOpNotifier)
+            self.assertFalse((Path(tmpdir) / "disabled.jsonl").exists())
+
+            file_config = parse_config(
+                {
+                    "notifier": {
+                        "channels": {
+                            "file": True,
+                            "email": False,
+                        },
+                        "alert_log_path": str(Path(tmpdir) / "file_only.jsonl"),
+                    },
+                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                }
+            )
+            file_notifier = build_notifier(file_config)
+
+            file_notifier.notify(_event())
+
+            recorder_path = Path(tmpdir) / "live" / "file_only.jsonl"
+            self.assertEqual(len(recorder_path.read_text(encoding="utf-8").splitlines()), 1)
+
+            email_config = parse_config(
+                {
+                    "notifier": {
+                        "channels": {
+                            "file": False,
+                            "email": True,
+                        },
+                        "email": {
+                            "smtp_host": "smtp.example.com",
+                            "from_addr": "from@example.com",
+                            "to_addrs": ["to@example.com"],
+                            "alert_interval_seconds": 0,
+                        },
+                    },
+                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                }
+            )
+            email_notifier = build_notifier(email_config)
+
+            with patch("optionsentry.notifiers.smtplib.SMTP", _CapturingSMTP):
+                _CapturingSMTP.calls = 0
+                _CapturingSMTP.messages = []
+                email_notifier.notify(_event())
+
+            self.assertEqual(_CapturingSMTP.calls, 1)
 
 
 class _CapturingSMTP:

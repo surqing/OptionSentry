@@ -95,7 +95,18 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(main_window.auto_active_refresh.text(), "自动刷新")
         self.assertTrue(main_window.auto_active_refresh.isChecked())
         self.assertEqual(main_window.active_refresh_interval.currentData(), 10)
-        self.assertEqual(main_window.config_editor.build_config().runtime.mode, "live")
+        editor_config = main_window.config_editor.build_config()
+        self.assertEqual(editor_config.runtime.mode, "live")
+        self.assertFalse(main_window.config_editor.notify_popup.isChecked())
+        self.assertFalse(main_window.config_editor.notify_sound.isChecked())
+        self.assertTrue(main_window.config_editor.notify_file.isChecked())
+        self.assertTrue(main_window.config_editor.notify_email.isChecked())
+        self.assertEqual(main_window.config_editor.popup_duration_seconds.value(), 2)
+        self.assertEqual(main_window.config_editor.sound_duration_seconds.value(), 2)
+        self.assertFalse(editor_config.notifier.channels.popup)
+        self.assertFalse(editor_config.notifier.channels.sound)
+        self.assertTrue(editor_config.notifier.channels.file)
+        self.assertTrue(editor_config.notifier.channels.email)
         self.assertEqual(main_window.findChildren(QToolBar), [])
         self.assertIs(main_window.save_action, main_window.config_editor.save_button)
         self.assertIs(main_window.reload_action, main_window.config_editor.reload_button)
@@ -106,6 +117,19 @@ class GuiSmokeTests(unittest.TestCase):
         main_window.config_editor.min_volume.setValue(100)
         self.assertEqual(main_window.config_editor.min_volume.text(), "100")
         self.assertEqual(main_window.config_editor.build_config().universe.min_volume, 100)
+        main_window.config_editor.notify_popup.setChecked(True)
+        main_window.config_editor.notify_sound.setChecked(True)
+        main_window.config_editor.notify_file.setChecked(False)
+        main_window.config_editor.notify_email.setChecked(False)
+        main_window.config_editor.popup_duration_seconds.setValue(5)
+        main_window.config_editor.sound_duration_seconds.setValue(7)
+        notifier_config = main_window.config_editor.build_config().notifier
+        self.assertTrue(notifier_config.channels.popup)
+        self.assertTrue(notifier_config.channels.sound)
+        self.assertFalse(notifier_config.channels.file)
+        self.assertFalse(notifier_config.channels.email)
+        self.assertEqual(notifier_config.popup.duration_seconds, 5)
+        self.assertEqual(notifier_config.sound.duration_seconds, 7)
         self.assertEqual(main_window.config_editor.strategies.columnCount(), 5)
         self.assertGreaterEqual(main_window.config_editor.strategies.minimumHeight(), 180)
         self.assertEqual(
@@ -260,6 +284,69 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertTrue(event.ignored)
         main_window.close()
         window.close()
+
+    def test_local_alert_channels_use_monitor_config(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtWidgets import QApplication
+
+        from optionsentry.config import parse_config
+        from optionsentry.gui.app import MainWindow
+        from optionsentry.gui.credentials import CredentialResolution
+
+        app = QApplication.instance() or QApplication([])
+        popup_sound_config = parse_config(
+            {
+                "notifier": {
+                    "channels": {
+                        "popup": True,
+                        "sound": True,
+                        "file": False,
+                        "email": False,
+                    },
+                    "popup": {"duration_seconds": 5},
+                    "sound": {"duration_seconds": 7},
+                },
+                "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
+            }
+        )
+        silent_config = parse_config(
+            {
+                "notifier": {
+                    "channels": {
+                        "popup": False,
+                        "sound": False,
+                        "file": False,
+                        "email": False,
+                    }
+                },
+                "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
+            }
+        )
+        main_window = MainWindow(
+            Path("config.toml"),
+            silent_config,
+            CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
+        )
+        main_window._monitor_config = popup_sound_config
+
+        with patch("optionsentry.gui.app.QApplication.beep") as beep:
+            main_window._on_alert(_alert_event("popup-sound"))
+
+        beep.assert_called_once()
+        self.assertEqual(main_window._toast._label.text(), "message popup-sound")
+        self.assertEqual(main_window._toast._last_duration_ms, 5000)
+        self.assertTrue(main_window._alert_sound_timer.isActive())
+        main_window._stop_alert_sound()
+
+        main_window._monitor_config = silent_config
+        main_window._toast._label.setText("previous")
+        with patch("optionsentry.gui.app.QApplication.beep") as beep:
+            main_window._on_alert(_alert_event("silent"))
+
+        beep.assert_not_called()
+        self.assertEqual(main_window._toast._label.text(), "previous")
+        app.processEvents()
+        main_window.close()
 
     def test_cp_combo_signed_values_color_alert_and_active_rows(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
