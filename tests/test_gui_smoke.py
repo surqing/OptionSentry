@@ -248,7 +248,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(main_window.status_labels["timestamp"].text(), "2026-06-26 23:41:05.9")
         self.assertIn("策略名", _table_headers(main_window.active_table))
         for header in ("C虚实度", "P虚实度", "虚实度A", "虚实度B", "平均虚实度"):
-            self.assertIn(header, _table_headers(main_window.active_table))
+            self.assertNotIn(header, _table_headers(main_window.active_table))
             self.assertNotIn(header, _table_headers(main_window.alert_table))
         self.assertNotIn("消息", _table_headers(main_window.active_table))
         self.assertEqual(main_window.active_table.rowCount(), 2)
@@ -492,21 +492,30 @@ class GuiSmokeTests(unittest.TestCase):
         )
 
         headers = _table_headers(main_window.active_table)
+        self.assertEqual(headers, ("时间", "策略名", "值", "预警范围", "合约"))
+        self.assertEqual(_table_headers(main_window.alert_table), ("时间", "策略名", "值", "预警范围", "合约"))
+
+        main_window.active_view.set_strategy_filter("CP组合预警")
+        headers = _table_headers(main_window.active_table)
         self.assertEqual(
             headers,
-            ("时间", "策略名", "值", "C虚实度", "P虚实度", "虚实度A", "虚实度B", "平均虚实度", "预警范围", "合约"),
+            ("时间", "值", "C虚实度", "P虚实度", "预警范围", "合约"),
         )
-        self.assertEqual(_table_headers(main_window.alert_table), ("时间", "策略名", "值", "预警范围", "合约"))
-        self.assertEqual(main_window.active_table.item(0, 3).text(), "0.10000000")
-        self.assertEqual(main_window.active_table.item(0, 4).text(), "-0.10000000")
-        self.assertEqual(main_window.active_table.item(0, 5).text(), "-")
-        self.assertEqual(main_window.active_table.item(1, 3).text(), "-")
-        self.assertEqual(main_window.active_table.item(1, 5).text(), "0.20000000")
-        self.assertEqual(main_window.active_table.item(1, 6).text(), "0.10000000")
-        self.assertEqual(main_window.active_table.item(1, 7).text(), "0.15000000")
+        self.assertEqual(main_window.active_table.item(0, 2).text(), "0.10000000")
+        self.assertEqual(main_window.active_table.item(0, 3).text(), "-0.10000000")
 
-        _set_table_filter_text(main_window.active_table, 3, "0.09 0.11")
-        self.assertEqual(_visible_column_texts(main_window.active_table, 1), ("CP组合预警",))
+        _set_table_filter_text(main_window.active_table, 2, "0.09 0.11")
+        self.assertEqual(_visible_column_texts(main_window.active_table, 1), ("1.00000000",))
+
+        main_window.active_view.set_strategy_filter("价差预警")
+        headers = _table_headers(main_window.active_table)
+        self.assertEqual(
+            headers,
+            ("时间", "值", "虚实度A", "虚实度B", "平均虚实度", "预警范围", "合约"),
+        )
+        self.assertEqual(main_window.active_table.item(0, 2).text(), "0.20000000")
+        self.assertEqual(main_window.active_table.item(0, 3).text(), "0.10000000")
+        self.assertEqual(main_window.active_table.item(0, 4).text(), "0.15000000")
         app.processEvents()
         main_window.close()
 

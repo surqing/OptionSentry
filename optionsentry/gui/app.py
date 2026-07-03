@@ -79,13 +79,6 @@ TOAST_FADE_MS = 150
 ALERT_SOUND_BEEP_INTERVAL_MS = 700
 CP_NEGATIVE_VALUE_COLOR = "#d8ecdf"
 CP_POSITIVE_VALUE_COLOR = "#f1d7d2"
-MONEYNESS_COLUMNS = (
-    CALL_MONEYNESS_METRIC,
-    PUT_MONEYNESS_METRIC,
-    SPREAD_A_MONEYNESS_METRIC,
-    SPREAD_B_MONEYNESS_METRIC,
-    SPREAD_AVG_MONEYNESS_METRIC,
-)
 
 
 def app_icon() -> QIcon:
@@ -934,7 +927,7 @@ class StrategyEvaluationTable(QGroupBox):
         self._selected_strategy: str | None = None
         self._records: list[_EvaluationRecord] = []
         self._buttons: dict[str | None, QPushButton] = {}
-        self._table_shape: tuple[bool, bool] | None = None
+        self._table_shape: tuple[bool, tuple[str, ...]] | None = None
 
         layout = QVBoxLayout(self)
         filter_row = QHBoxLayout()
@@ -1022,7 +1015,6 @@ class StrategyEvaluationTable(QGroupBox):
 
     def _render(self, scroll_to_bottom: bool = False, preserve_scroll: bool = False) -> None:
         include_strategy = self._selected_strategy is None
-        self._ensure_table_shape(include_strategy)
         vertical_scroll = self.table.verticalScrollBar()
         horizontal_scroll = self.table.horizontalScrollBar()
         previous_vertical = vertical_scroll.value() if preserve_scroll else 0
@@ -1032,9 +1024,11 @@ class StrategyEvaluationTable(QGroupBox):
             for record in self._records
             if include_strategy or record.evaluation.strategy_name == self._selected_strategy
         ]
+        metric_columns = self._metric_columns(records, include_strategy)
+        self._ensure_table_shape(include_strategy, metric_columns)
         self.table.setRowCount(0)
         for record in records:
-            self._append_row(record, include_strategy)
+            self._append_row(record, include_strategy, metric_columns)
         _restore_table_sort(self.table)
         _apply_table_filters(self.table)
         if scroll_to_bottom:
@@ -1043,8 +1037,33 @@ class StrategyEvaluationTable(QGroupBox):
             vertical_scroll.setValue(min(previous_vertical, vertical_scroll.maximum()))
             horizontal_scroll.setValue(min(previous_horizontal, horizontal_scroll.maximum()))
 
-    def _ensure_table_shape(self, include_strategy: bool) -> None:
-        table_shape = (include_strategy, self._show_moneyness_columns)
+    def _metric_columns(self, records: list[_EvaluationRecord], include_strategy: bool) -> tuple[str, ...]:
+        if include_strategy or not self._show_moneyness_columns:
+            return ()
+        metric_names = {
+            metric_name
+            for record in records
+            for metric_name in record.evaluation.metrics
+        }
+        if any(metric_name in metric_names for metric_name in (CALL_MONEYNESS_METRIC, PUT_MONEYNESS_METRIC)):
+            return (CALL_MONEYNESS_METRIC, PUT_MONEYNESS_METRIC)
+        if any(
+            metric_name in metric_names
+            for metric_name in (
+                SPREAD_A_MONEYNESS_METRIC,
+                SPREAD_B_MONEYNESS_METRIC,
+                SPREAD_AVG_MONEYNESS_METRIC,
+            )
+        ):
+            return (
+                SPREAD_A_MONEYNESS_METRIC,
+                SPREAD_B_MONEYNESS_METRIC,
+                SPREAD_AVG_MONEYNESS_METRIC,
+            )
+        return ()
+
+    def _ensure_table_shape(self, include_strategy: bool, metric_columns: tuple[str, ...]) -> None:
+        table_shape = (include_strategy, metric_columns)
         if self._table_shape == table_shape:
             return
         self._table_shape = table_shape
@@ -1054,19 +1073,27 @@ class StrategyEvaluationTable(QGroupBox):
         else:
             headers = ("时间", "值", "预警范围", "合约")
             widths = (165, 100, 150, 360)
-        if self._show_moneyness_columns:
-            metric_widths = (105, 105, 105, 105, 115)
+        if metric_columns:
+            metric_widths = tuple(
+                115 if metric_name == SPREAD_AVG_MONEYNESS_METRIC else 105
+                for metric_name in metric_columns
+            )
             if include_strategy:
-                headers = (*headers[:3], *MONEYNESS_COLUMNS, *headers[3:])
+                headers = (*headers[:3], *metric_columns, *headers[3:])
                 widths = (*widths[:3], *metric_widths, *widths[3:])
             else:
-                headers = (*headers[:2], *MONEYNESS_COLUMNS, *headers[2:])
+                headers = (*headers[:2], *metric_columns, *headers[2:])
                 widths = (*widths[:2], *metric_widths, *widths[2:])
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         _configure_resizable_columns(self.table, widths, stretch_last=True)
 
-    def _append_row(self, record: _EvaluationRecord, include_strategy: bool) -> None:
+    def _append_row(
+        self,
+        record: _EvaluationRecord,
+        include_strategy: bool,
+        metric_columns: tuple[str, ...],
+    ) -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
         evaluation = record.evaluation
@@ -1078,8 +1105,8 @@ class StrategyEvaluationTable(QGroupBox):
         ]
         if include_strategy:
             values.insert(1, (evaluation.strategy_name, evaluation.strategy_name.casefold()))
-        if self._show_moneyness_columns:
-            values.extend(_moneyness_cells(evaluation))
+        if metric_columns:
+            values.extend(_moneyness_cells(evaluation, metric_columns))
         values.extend(
             [
                 (
@@ -1098,8 +1125,11 @@ class StrategyEvaluationTable(QGroupBox):
             self.table.setItem(row, column, item)
 
 
-def _moneyness_cells(evaluation: ConditionEvaluation) -> list[tuple[str, object | None]]:
-    return [_moneyness_cell(evaluation, metric_name) for metric_name in MONEYNESS_COLUMNS]
+def _moneyness_cells(
+    evaluation: ConditionEvaluation,
+    metric_columns: tuple[str, ...],
+) -> list[tuple[str, object | None]]:
+    return [_moneyness_cell(evaluation, metric_name) for metric_name in metric_columns]
 
 
 def _moneyness_cell(evaluation: ConditionEvaluation, metric_name: str) -> tuple[str, object | None]:
