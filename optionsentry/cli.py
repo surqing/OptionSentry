@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from optionsentry.alerts import AlertEngine
 from optionsentry.config import ConfigError, load_config
@@ -18,7 +19,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        config = load_config(args.config)
+        config_path = Path(args.config)
+        config = load_config(config_path)
         logger = setup_logging(config.logging, config.runtime.mode)
         logger.info(
             "Starting OptionSentry mode=%s strategies=%s universe_mode=%s",
@@ -34,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
             alert_engine=AlertEngine(alert_on_first_match=config.runtime.alert_on_first_match),
             notifier=build_notifier(config),
             logger=logger,
+            config_dir=config_path.resolve().parent,
             cycle_summary_interval_seconds=config.logging.cycle_summary_interval_seconds,
         )
         runner.run()

@@ -149,7 +149,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertFalse(notifier_config.channels.email)
         self.assertEqual(notifier_config.popup.duration_seconds, 5)
         self.assertEqual(notifier_config.sound.duration_seconds, 7)
-        self.assertEqual(main_window.config_editor.strategies.columnCount(), 5)
+        self.assertEqual(main_window.config_editor.strategies.columnCount(), 8)
         self.assertGreaterEqual(main_window.config_editor.strategies.minimumHeight(), 180)
         self.assertEqual(
             main_window.config_editor.strategies.item(0, 0).checkState(),
@@ -163,6 +163,11 @@ class GuiSmokeTests(unittest.TestCase):
             [strategy.type for strategy in main_window.config_editor.build_config().selected_strategies],
             ["cp_combo"],
         )
+        self.assertEqual(main_window.config_editor.strategies.item(0, 5).text(), "")
+        self.assertEqual(main_window.config_editor.strategies.item(0, 6).text(), "accept")
+        self.assertEqual(main_window.config_editor.strategies.item(0, 7).text(), "options")
+        main_window.config_editor.strategies.item(0, 5).setText("filters/gold.py")
+        self.assertEqual(main_window.config_editor.build_config().strategies[0].filter_script, "filters/gold.py")
         self.assertIn("QTableWidget::item:hover", app.styleSheet())
         self.assertEqual(
             _format_table_timestamp("2026-06-26 23:41:05.000000"),

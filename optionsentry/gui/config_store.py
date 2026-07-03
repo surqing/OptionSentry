@@ -16,7 +16,7 @@ def config_to_data(config: AppConfig) -> dict[str, Any]:
         "runtime": asdict(config.runtime),
         "universe": asdict(config.universe),
         "datasource": {"tqsdk": asdict(config.tqsdk)},
-        "strategies": [asdict(strategy) for strategy in config.strategies],
+        "strategies": [_strategy_dict(strategy) for strategy in config.strategies],
         "backtest": _date_strings(asdict(config.backtest)),
         "notifier": {
             "kind": None,
@@ -81,6 +81,15 @@ def _strategy_array(items: list[dict[str, Any]]) -> Any:
                 table[key] = _toml_value(value)
         array.append(table)
     return array
+
+
+def _strategy_dict(strategy: Any) -> dict[str, Any]:
+    item = asdict(strategy)
+    if not item.get("filter_script"):
+        item.pop("filter_script", None)
+        item.pop("filter_function", None)
+        item.pop("filter_scope", None)
+    return item
 
 
 def _toml_value(value: Any) -> Any:

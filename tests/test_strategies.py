@@ -33,6 +33,46 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(strategy_display_name(config), "custom")
         self.assertEqual(build_strategy(config).name, "custom")
 
+    def test_strategy_filter_config_defaults_and_builds_strategy(self) -> None:
+        parsed = parse_config(
+            {
+                "strategies": [
+                    {
+                        "type": "cp_combo",
+                        "min_value": 0.01,
+                        "max_value": float("inf"),
+                        "filter_script": "filters/gold.py",
+                    }
+                ]
+            }
+        )
+
+        strategy_config = parsed.strategies[0]
+        strategy = build_strategy(strategy_config)
+
+        self.assertEqual(strategy_config.filter_script, "filters/gold.py")
+        self.assertEqual(strategy_config.filter_function, "accept")
+        self.assertEqual(strategy_config.filter_scope, "options")
+        self.assertEqual(strategy.filter_script, "filters/gold.py")
+        self.assertEqual(strategy.filter_function, "accept")
+        self.assertEqual(strategy.filter_scope, "options")
+
+    def test_strategy_filter_scope_only_supports_options(self) -> None:
+        with self.assertRaisesRegex(ValueError, "filter_scope"):
+            parse_config(
+                {
+                    "strategies": [
+                        {
+                            "type": "cp_combo",
+                            "min_value": 0.01,
+                            "max_value": float("inf"),
+                            "filter_script": "filters/gold.py",
+                            "filter_scope": "all",
+                        }
+                    ]
+                }
+            )
+
     def test_cp_combo_uses_positive_warning_range(self) -> None:
         universe = sample_universe()
         snap = snapshot(

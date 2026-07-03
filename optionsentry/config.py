@@ -62,6 +62,9 @@ class StrategyConfig:
     max_value: float
     name: str | None = None
     selected: bool = True
+    filter_script: str | None = None
+    filter_function: str = "accept"
+    filter_scope: str = "options"
 
 
 DEFAULT_STRATEGY_DISPLAY_NAMES = {
@@ -274,6 +277,9 @@ def _parse_strategy_item(
                 max_value=_float_value(item["max_value"], f"Strategy {strategy_type} max_value"),
                 name=name,
                 selected=selected,
+                filter_script=_optional_str(item.get("filter_script")),
+                filter_function=str(item.get("filter_function", "accept") or "accept"),
+                filter_scope=str(item.get("filter_scope", "options") or "options"),
             ),
         )
     if "threshold" not in item:
@@ -289,6 +295,9 @@ def _parse_strategy_item(
                 max_value=math.inf,
                 name=name,
                 selected=selected,
+                filter_script=_optional_str(item.get("filter_script")),
+                filter_function=str(item.get("filter_function", "accept") or "accept"),
+                filter_scope=str(item.get("filter_scope", "options") or "options"),
             ),
             StrategyConfig(
                 type=strategy_type,
@@ -296,6 +305,9 @@ def _parse_strategy_item(
                 max_value=-threshold,
                 name=name,
                 selected=selected,
+                filter_script=_optional_str(item.get("filter_script")),
+                filter_function=str(item.get("filter_function", "accept") or "accept"),
+                filter_scope=str(item.get("filter_scope", "options") or "options"),
             ),
         )
     return (
@@ -305,6 +317,9 @@ def _parse_strategy_item(
             max_value=threshold,
             name=name,
             selected=selected,
+            filter_script=_optional_str(item.get("filter_script")),
+            filter_function=str(item.get("filter_function", "accept") or "accept"),
+            filter_scope=str(item.get("filter_scope", "options") or "options"),
         ),
     )
 
@@ -437,6 +452,10 @@ def _validate_config(
     for strategy in strategies:
         if strategy.type not in {"cp_combo", "abs_spread"}:
             raise ConfigError(f"Unsupported strategy type: {strategy.type}")
+        if strategy.filter_scope != "options":
+            raise ConfigError(f"Strategy filter_scope must be 'options': {strategy.type}")
+        if not strategy.filter_function.strip():
+            raise ConfigError(f"Strategy filter_function cannot be empty: {strategy.type}")
         if math.isnan(strategy.min_value) or math.isnan(strategy.max_value):
             raise ConfigError(f"Strategy range cannot contain NaN: {strategy.type}")
         if strategy.min_value >= strategy.max_value:

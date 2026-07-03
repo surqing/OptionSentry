@@ -3,13 +3,15 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 from optionsentry.alerts import AlertEngine
 from optionsentry.data_sources.base import MarketDataSource
 from optionsentry.models import AlertEvent, ConditionEvaluation, Universe
 from optionsentry.notifiers import Notifier
-from optionsentry.strategies import Strategy
+from optionsentry.strategies import CompiledStrategy, Strategy
+from optionsentry.strategy_filters import apply_strategy_filter
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,7 @@ class AlertRunner:
     alert_engine: AlertEngine
     notifier: Notifier
     logger: logging.Logger
+    config_dir: str | Path = "."
     cycle_summary_interval_seconds: int = 60
     stop_requested: Callable[[], bool] | None = None
     callbacks: RunnerCallbacks = field(default_factory=RunnerCallbacks)
@@ -57,16 +60,21 @@ class AlertRunner:
         try:
             self._emit_status("discovering")
             universe = self.data_source.discover_universe()
-            self._emit_universe(universe)
             if not universe.options:
                 self.logger.warning("Universe has no futures options to evaluate.")
+                self._emit_universe(universe)
                 self._emit_status("empty_universe")
                 return 0
 
             self._emit_status("compiling")
-            compiled_strategies = tuple(strategy.compile(universe) for strategy in self.strategies)
+            compiled_strategies, stream_universe = self._compile_strategies(universe)
             total_conditions = sum(strategy.condition_count for strategy in compiled_strategies)
+            self._emit_universe(stream_universe)
             self._emit_compiled(len(compiled_strategies), total_conditions)
+            if not compiled_strategies or total_conditions == 0:
+                self.logger.warning("No alert conditions after strategy filters and compilation.")
+                self._emit_status("empty_conditions")
+                return 0
             self.logger.info(
                 "Compiled alert strategies: strategies=%s total_conditions=%s",
                 len(compiled_strategies),
@@ -74,7 +82,7 @@ class AlertRunner:
             )
 
             initialized = False
-            for snapshot in self.data_source.stream(universe):
+            for snapshot in self.data_source.stream(stream_universe):
                 if self._should_stop():
                     self._emit_status("stopping")
                     break
@@ -169,6 +177,30 @@ class AlertRunner:
         self.logger.info("Runner stopped: cycles=%s alerts=%s", cycle_count, alert_count)
         return alert_count
 
+    def _compile_strategies(self, universe: Universe) -> tuple[tuple[CompiledStrategy, ...], Universe]:
+        compiled_strategies: list[CompiledStrategy] = []
+        active_universes: list[Universe] = []
+        for strategy in self.strategies:
+            filtered_universe = apply_strategy_filter(strategy, universe, self.config_dir, self.logger)
+            if not filtered_universe.options:
+                self.logger.warning(
+                    "Skipping strategy with no options after filter: strategy=%s",
+                    strategy.name,
+                )
+                continue
+            compiled = strategy.compile(filtered_universe)
+            if compiled.condition_count == 0:
+                self.logger.warning(
+                    "Skipping strategy with no compiled conditions: strategy=%s options=%s futures=%s",
+                    strategy.name,
+                    len(filtered_universe.options),
+                    len(filtered_universe.futures),
+                )
+                continue
+            compiled_strategies.append(compiled)
+            active_universes.append(filtered_universe)
+        return tuple(compiled_strategies), _merge_universes(active_universes)
+
     def _notify(self, event: AlertEvent) -> None:
         self.logger.warning("alert key=%s message=%s", event.evaluation.key, event.evaluation.message)
         try:
@@ -216,3 +248,12 @@ class AlertRunner:
     def _emit_alert(self, event: AlertEvent) -> None:
         if self.callbacks.on_alert is not None:
             self.callbacks.on_alert(event)
+
+
+def _merge_universes(universes: list[Universe]) -> Universe:
+    instruments = {}
+    requested_symbols: set[str] = set()
+    for universe in universes:
+        instruments.update(universe.instruments)
+        requested_symbols.update(universe.requested_symbols)
+    return Universe(instruments=instruments, requested_symbols=tuple(sorted(requested_symbols)))

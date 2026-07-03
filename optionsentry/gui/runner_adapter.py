@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Event
 from typing import Callable
 
@@ -37,7 +38,7 @@ class GuiRunContext:
         self.runner.data_source.close()
 
 
-def build_gui_runner(config: AppConfig, signals: GuiRunSignals) -> GuiRunContext:
+def build_gui_runner(config: AppConfig, signals: GuiRunSignals, config_path: str | Path = "config.toml") -> GuiRunContext:
     stop_event = Event()
     logger = setup_logging(config.logging, config.runtime.mode)
     gui_log_handler = None
@@ -61,6 +62,7 @@ def build_gui_runner(config: AppConfig, signals: GuiRunSignals) -> GuiRunContext
         alert_engine=AlertEngine(alert_on_first_match=config.runtime.alert_on_first_match),
         notifier=build_notifier(config),
         logger=logger,
+        config_dir=Path(config_path).resolve().parent,
         cycle_summary_interval_seconds=config.logging.cycle_summary_interval_seconds,
         stop_requested=stop_event.is_set,
         callbacks=RunnerCallbacks(

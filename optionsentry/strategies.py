@@ -34,6 +34,9 @@ class CompiledStrategy:
 
 class Strategy:
     name: str
+    filter_script: str | None = None
+    filter_function: str = "accept"
+    filter_scope: str = "options"
 
     def evaluate(self, snapshot: MarketSnapshot, universe: Universe) -> list[ConditionEvaluation]:
         raise NotImplementedError
@@ -67,6 +70,9 @@ class CPComboStrategy(Strategy):
     min_value: float
     max_value: float
     name: str = "cp_combo"
+    filter_script: str | None = None
+    filter_function: str = "accept"
+    filter_scope: str = "options"
 
     def evaluate(self, snapshot: MarketSnapshot, universe: Universe) -> list[ConditionEvaluation]:
         return self.compile(universe).evaluate(snapshot)
@@ -80,6 +86,9 @@ class AbsSpreadStrategy(Strategy):
     min_value: float
     max_value: float
     name: str = "abs_spread"
+    filter_script: str | None = None
+    filter_function: str = "accept"
+    filter_scope: str = "options"
 
     def evaluate(self, snapshot: MarketSnapshot, universe: Universe) -> list[ConditionEvaluation]:
         return self.compile(universe).evaluate(snapshot)
@@ -243,9 +252,23 @@ class _CompiledAbsSpreadStrategy(CompiledStrategy):
 def build_strategy(config: StrategyConfig) -> Strategy:
     name = strategy_display_name(config)
     if config.type == "cp_combo":
-        return CPComboStrategy(min_value=config.min_value, max_value=config.max_value, name=name)
+        return CPComboStrategy(
+            min_value=config.min_value,
+            max_value=config.max_value,
+            name=name,
+            filter_script=config.filter_script,
+            filter_function=config.filter_function,
+            filter_scope=config.filter_scope,
+        )
     if config.type == "abs_spread":
-        return AbsSpreadStrategy(min_value=config.min_value, max_value=config.max_value, name=name)
+        return AbsSpreadStrategy(
+            min_value=config.min_value,
+            max_value=config.max_value,
+            name=name,
+            filter_script=config.filter_script,
+            filter_function=config.filter_function,
+            filter_scope=config.filter_scope,
+        )
     raise ValueError(f"Unsupported strategy type: {config.type}")
 
 

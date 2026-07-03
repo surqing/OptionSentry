@@ -256,9 +256,10 @@ class MonitorWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal(int)
 
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(self, config: AppConfig, config_path: Path) -> None:
         super().__init__()
         self.config = config
+        self.config_path = config_path
         self._context = None
         self._stop_before_start = False
 
@@ -274,6 +275,7 @@ class MonitorWorker(QObject):
                     on_cycle=self.cycle.emit,
                     on_alert=self.alert.emit,
                 ),
+                self.config_path,
             )
             if self._stop_before_start:
                 self._context.stop()
@@ -489,6 +491,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self._monitor_tab(), "监控")
         self.tabs.addTab(self._alerts_tab(), "预警")
         self.config_editor = ConfigEditor()
+        self.config_editor.set_config_path(self.config_path)
         self.config_editor.save_button.clicked.connect(self._save_config)
         self.config_editor.reload_button.clicked.connect(self._reload_config)
         self.tabs.addTab(self.config_editor, "配置")
@@ -594,7 +597,7 @@ class MainWindow(QMainWindow):
         self._append_log("Starting monitor")
         self._set_running(True)
         self._monitor_thread = QThread(self)
-        self._monitor_worker = MonitorWorker(monitor_config)
+        self._monitor_worker = MonitorWorker(monitor_config, self.config_path)
         self._monitor_worker.moveToThread(self._monitor_thread)
         self._monitor_thread.started.connect(self._monitor_worker.run)
         self._monitor_worker.status.connect(lambda status: self._set_status("status", status))
@@ -1179,6 +1182,7 @@ class ConfigEditor(QWidget):
         super().__init__()
         self._tqsdk_username: str | None = None
         self._tqsdk_password: str | None = None
+        self._config_dir = Path(".").resolve()
         outer = QVBoxLayout(self)
         actions = QHBoxLayout()
         self.save_button = QPushButton("保存配置")
@@ -1203,6 +1207,9 @@ class ConfigEditor(QWidget):
         self.content_layout.addStretch(1)
         scroll.setWidget(content)
         outer.addWidget(scroll)
+
+    def set_config_path(self, config_path: Path) -> None:
+        self._config_dir = config_path.resolve().parent
 
     def _build_runtime(self) -> None:
         box = QGroupBox("运行")
@@ -1250,12 +1257,16 @@ class ConfigEditor(QWidget):
         remove_button = QPushButton("删除")
         remove_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
         remove_button.clicked.connect(self._remove_strategy_row)
+        script_button = QPushButton("选择脚本")
+        script_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        script_button.clicked.connect(self._browse_strategy_filter_script)
         row.addWidget(add_button)
         row.addWidget(remove_button)
+        row.addWidget(script_button)
         row.addStretch(1)
         layout.addLayout(row)
-        self.strategies = QTableWidget(0, 5)
-        self.strategies.setHorizontalHeaderLabels(("选中", "类型", "最小值", "最大值", "名称"))
+        self.strategies = QTableWidget(0, 8)
+        self.strategies.setHorizontalHeaderLabels(("选中", "类型", "最小值", "最大值", "名称", "筛选脚本", "函数", "范围"))
         self.strategies.setAlternatingRowColors(True)
         self.strategies.setMinimumHeight(180)
         self.strategies.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -1263,7 +1274,7 @@ class ConfigEditor(QWidget):
         self.strategies.verticalHeader().setDefaultSectionSize(36)
         self.strategies.verticalHeader().setMinimumSectionSize(32)
         self.strategies.verticalHeader().setVisible(False)
-        _configure_resizable_columns(self.strategies, (70, 130, 110, 110, 180))
+        _configure_resizable_columns(self.strategies, (70, 130, 110, 110, 180, 240, 110, 90))
         self.strategies.itemChanged.connect(self._on_strategy_item_changed)
         layout.addWidget(self.strategies)
         self.content_layout.addWidget(box)
@@ -1380,6 +1391,9 @@ class ConfigEditor(QWidget):
                 strategy.max_value,
                 strategy.name or "",
                 strategy.selected,
+                strategy.filter_script or "",
+                strategy.filter_function,
+                strategy.filter_scope,
                 restore_sort=False,
             )
         _restore_table_sort(self.strategies)
@@ -1522,6 +1536,9 @@ class ConfigEditor(QWidget):
             min_value = float(_table_text(self.strategies, row, 2) or "-inf")
             max_value = float(_table_text(self.strategies, row, 3) or "inf")
             name = _table_text(self.strategies, row, 4)
+            filter_script = _table_text(self.strategies, row, 5)
+            filter_function = _table_text(self.strategies, row, 6) or "accept"
+            filter_scope = _table_text(self.strategies, row, 7) or "options"
             item = {
                 "type": strategy_type,
                 "min_value": min_value,
@@ -1530,6 +1547,10 @@ class ConfigEditor(QWidget):
             }
             if name:
                 item["name"] = name
+            if filter_script:
+                item["filter_script"] = filter_script
+                item["filter_function"] = filter_function
+                item["filter_scope"] = filter_scope
             rows.append(item)
         return rows
 
@@ -1540,6 +1561,9 @@ class ConfigEditor(QWidget):
         max_value: float,
         name: str,
         selected: bool = True,
+        filter_script: str = "",
+        filter_function: str = "accept",
+        filter_scope: str = "options",
         restore_sort: bool = True,
     ) -> None:
         row = self.strategies.rowCount()
@@ -1557,9 +1581,41 @@ class ConfigEditor(QWidget):
         self.strategies.setItem(row, 2, _table_item(_format_bound(min_value), sort_key=min_value))
         self.strategies.setItem(row, 3, _table_item(_format_bound(max_value), sort_key=max_value))
         self.strategies.setItem(row, 4, _table_item(name, sort_key=name.casefold()))
+        self.strategies.setItem(row, 5, _table_item(filter_script, sort_key=filter_script.casefold()))
+        self.strategies.setItem(row, 6, _table_item(filter_function, sort_key=filter_function.casefold()))
+        self.strategies.setItem(row, 7, _table_item(filter_scope, sort_key=filter_scope.casefold()))
         if restore_sort:
             _restore_table_sort(self.strategies)
             _apply_table_filters(self.strategies)
+
+    def _browse_strategy_filter_script(self) -> None:
+        row = self.strategies.currentRow()
+        if row < 0:
+            row = 0 if self.strategies.rowCount() else -1
+        if row < 0:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择策略筛选脚本",
+            str(self._config_dir),
+            "Python (*.py);;All Files (*)",
+        )
+        if not path:
+            return
+        script_path = Path(path).resolve()
+        try:
+            display_path = str(script_path.relative_to(self._config_dir))
+        except ValueError:
+            try:
+                display_path = os.path.relpath(script_path, self._config_dir)
+            except ValueError:
+                display_path = str(script_path)
+        item = self.strategies.item(row, 5)
+        if item is None:
+            item = _table_item(display_path, sort_key=display_path.casefold())
+            self.strategies.setItem(row, 5, item)
+        else:
+            item.setText(display_path)
 
     def _remove_strategy_row(self) -> None:
         row = self.strategies.currentRow()

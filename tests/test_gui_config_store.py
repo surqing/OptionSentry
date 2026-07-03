@@ -146,6 +146,36 @@ class GuiConfigStoreTests(unittest.TestCase):
             self.assertFalse(saved.gui.active_alerts.auto_refresh)
             self.assertEqual(saved.gui.active_alerts.refresh_interval_seconds, 180)
 
+    def test_save_config_writes_strategy_filter_only_when_script_is_set(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "config.toml"
+            config = parse_config(
+                {
+                    "strategies": [
+                        {
+                            "type": "cp_combo",
+                            "min_value": 0.01,
+                            "max_value": float("inf"),
+                            "filter_script": "filters/gold.py",
+                            "filter_function": "accept",
+                            "filter_scope": "options",
+                        },
+                        {"type": "abs_spread", "min_value": float("-inf"), "max_value": 0.1},
+                    ],
+                }
+            )
+
+            save_config(path, config)
+
+            text = path.read_text(encoding="utf-8")
+            saved = parse_config(config_to_data(config))
+            self.assertIn('filter_script = "filters/gold.py"', text)
+            self.assertIn('filter_function = "accept"', text)
+            self.assertIn('filter_scope = "options"', text)
+            self.assertEqual(text.count("filter_function"), 1)
+            self.assertEqual(saved.strategies[0].filter_script, "filters/gold.py")
+            self.assertIsNone(saved.strategies[1].filter_script)
+
     def test_save_config_writes_notifier_channels_and_removes_legacy_kind(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "config.toml"
