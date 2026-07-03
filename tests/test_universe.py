@@ -168,23 +168,38 @@ class UniverseTests(unittest.TestCase):
                 }
             )
 
-    def test_config_normalizes_universe_symbols(self) -> None:
+    def test_config_normalizes_universe_match_terms(self) -> None:
         config = parse_config(
             {
                 "runtime": {},
                 "universe": {
-                    "mode": "symbols",
-                    "underlyings": ["shfe.au2608"],
-                    "symbols": ["shfe.au2608c600"],
+                    "mode": "onlyDo",
+                    "only_do": ["shfe.au2608", "ag"],
+                    "excludeDo": ["shfe.au2608c600"],
                     "exchange_ids": ["shfe"],
                 },
                 "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
             }
         )
 
-        self.assertEqual(config.universe.underlyings, ("SHFE.AU2608",))
-        self.assertEqual(config.universe.symbols, ("SHFE.AU2608C600",))
+        self.assertEqual(config.universe.only_do, ("SHFE.AU2608", "AG"))
+        self.assertEqual(config.universe.exclude_do, ("SHFE.AU2608C600",))
         self.assertEqual(config.universe.exchange_ids, ("SHFE",))
+
+        with self.assertRaisesRegex(ConfigError, "universe.only_do"):
+            parse_config(
+                {
+                    "universe": {"mode": "onlyDo"},
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
+                }
+            )
+        with self.assertRaisesRegex(ConfigError, "universe.exclude_do"):
+            parse_config(
+                {
+                    "universe": {"mode": "excludeDo"},
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
+                }
+            )
 
     def test_config_parses_active_alert_refresh_settings(self) -> None:
         config = parse_config(
@@ -378,6 +393,47 @@ class UniverseTests(unittest.TestCase):
         )
         self.assertTrue(all(api.closed for api in probe_apis))
 
+    def test_only_do_discovers_matching_futures_and_options(self) -> None:
+        api = _FakeDiscoveryApi(_multi_product_rows())
+        source = _FakeDiscoveryDataSource(
+            api,
+            min_volume=0,
+            min_open_interest=0,
+            mode="onlyDo",
+            only_do=("Ag", "Au"),
+        )
+
+        universe = source.discover_universe()
+
+        self.assertEqual(
+            {option.symbol for option in universe.options},
+            {
+                "SHFE.AG2608C5000",
+                "SHFE.AG2608P5000",
+                "SHFE.AU2608C600",
+                "SHFE.AU2608P600",
+            },
+        )
+        self.assertEqual({future.symbol for future in universe.futures}, {"SHFE.AG2608", "SHFE.AU2608"})
+
+    def test_exclude_do_removes_matching_futures_and_options(self) -> None:
+        api = _FakeDiscoveryApi(_multi_product_rows())
+        source = _FakeDiscoveryDataSource(
+            api,
+            min_volume=0,
+            min_open_interest=0,
+            mode="excludeDo",
+            exclude_do=("Ag", "Au"),
+        )
+
+        universe = source.discover_universe()
+
+        self.assertEqual(
+            {option.symbol for option in universe.options},
+            {"SHFE.CU2608C70000", "SHFE.CU2608P70000"},
+        )
+        self.assertEqual({future.symbol for future in universe.futures}, {"SHFE.CU2608"})
+
 
 class _FakeSymbolInfoApi:
     def __init__(self) -> None:
@@ -405,16 +461,19 @@ class _FakeDiscoveryDataSource(TqSdkDataSource):
         min_open_interest: float,
         probe_apis: tuple["_FakeDiscoveryApi", ...] = (),
         quote_subscription_batch_size: int = 10,
+        mode: str = "all",
+        only_do: tuple[str, ...] = (),
+        exclude_do: tuple[str, ...] = (),
     ) -> None:
         self.api = api
         self.probe_apis = list(probe_apis)
         self.config = SimpleNamespace(
             runtime=SimpleNamespace(mode="live"),
             universe=SimpleNamespace(
-                mode="all",
-                underlyings=(),
-                symbols=(),
-                exchange_ids=("SHFE",),
+                mode=mode,
+                only_do=only_do,
+                exclude_do=exclude_do,
+                exchange_ids=("SHFE",) if mode == "all" else (),
                 min_volume=min_volume,
                 min_open_interest=min_open_interest,
             ),
@@ -449,10 +508,11 @@ class _FakeDiscoveryApi:
 
     def query_quotes(self, **kwargs: Any) -> list[str]:
         exchange_id = kwargs.get("exchange_id")
+        ins_class = kwargs.get("ins_class")
         return [
             symbol
             for symbol, row in self.rows.items()
-            if row.get("ins_class") == "OPTION"
+            if row.get("ins_class") == ins_class
             and (exchange_id is None or row.get("exchange_id") == exchange_id)
         ]
 
@@ -557,6 +617,80 @@ def _liquidity_rows(include_metrics: bool) -> dict[str, dict[str, Any]]:
         rows["SHFE.au2608C620"].update({"volume": 2, "open_interest": 0})
         rows["SHFE.au2608P620"].update({"volume": 2, "open_interest": 3})
     return rows
+
+
+def _multi_product_rows() -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    rows.update(
+        _product_rows(
+            product="au",
+            future="au2608",
+            strike=600.0,
+            instrument_name="Gold",
+        )
+    )
+    rows.update(
+        _product_rows(
+            product="ag",
+            future="ag2608",
+            strike=5000.0,
+            instrument_name="Silver",
+        )
+    )
+    rows.update(
+        _product_rows(
+            product="cu",
+            future="cu2608",
+            strike=70000.0,
+            instrument_name="Copper",
+        )
+    )
+    return rows
+
+
+def _product_rows(
+    *,
+    product: str,
+    future: str,
+    strike: float,
+    instrument_name: str,
+) -> dict[str, dict[str, Any]]:
+    exchange = "SHFE"
+    call = f"{future}C{int(strike)}"
+    put = f"{future}P{int(strike)}"
+    return {
+        f"{exchange}.{future}": {
+            "instrument_id": future,
+            "exchange_id": exchange,
+            "ins_class": "FUTURE",
+            "product_id": product,
+            "instrument_name": instrument_name,
+        },
+        f"{exchange}.{call}": {
+            "instrument_id": call,
+            "exchange_id": exchange,
+            "ins_class": "OPTION",
+            "underlying_symbol": future,
+            "strike_price": strike,
+            "option_class": "CALL",
+            "exercise_year": 2026,
+            "exercise_month": 8,
+            "product_id": product,
+            "instrument_name": f"{instrument_name} call",
+        },
+        f"{exchange}.{put}": {
+            "instrument_id": put,
+            "exchange_id": exchange,
+            "ins_class": "OPTION",
+            "underlying_symbol": future,
+            "strike_price": strike,
+            "option_class": "PUT",
+            "exercise_year": 2026,
+            "exercise_month": 8,
+            "product_id": product,
+            "instrument_name": f"{instrument_name} put",
+        },
+    }
 
 
 if __name__ == "__main__":

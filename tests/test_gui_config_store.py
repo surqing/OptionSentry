@@ -27,7 +27,7 @@ class GuiConfigStoreTests(unittest.TestCase):
                 {
                     "runtime": {"mode": "backtest"},
                     "backtest": {"start_dt": "2026-01-02", "end_dt": "2026-01-05"},
-                    "universe": {"mode": "symbols", "symbols": ["SHFE.au2608C600"]},
+                    "universe": {"mode": "onlyDo", "only_do": ["SHFE.au2608C600"]},
                     "datasource": {
                         "tqsdk": {
                             "username_env": "TQSDK_USERNAME",

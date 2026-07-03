@@ -4,15 +4,16 @@ price_basis = "last"
 alert_on_first_match = false
 
 [universe]
-mode = "underlyings"
-underlyings = ["SHFE.AU2608"]
+mode = "onlyDo"
+only_do = ["AU"]
+exclude_do = []
 # Live-mode liquidity filters. 0 disables the filter; 1 filters out zero values.
 min_volume = 0
 min_open_interest = 0
 # mode = "all"
 # exchange_ids = ["SHFE", "DCE", "CZCE", "INE", "GFEX", "CFFEX"]
-# mode = "symbols"
-# symbols = ["SHFE.AU2608", "SHFE.AU2608C600"]
+# mode = "excludeDo"
+# exclude_do = ["AG", "AU"]
 
 [datasource.tqsdk]
 # username = "your-tqsdk-username"

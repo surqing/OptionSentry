@@ -1116,21 +1116,24 @@ class ConfigEditor(QWidget):
     def _build_universe(self) -> None:
         box = QGroupBox("合约范围")
         form = QFormLayout(box)
+        self._universe_form = form
         self.universe_mode = NoWheelComboBox()
-        self.universe_mode.addItems(("all", "underlyings", "symbols"))
-        self.underlyings = QTextEdit()
-        self.underlyings.setFixedHeight(70)
-        self.symbols = QTextEdit()
-        self.symbols.setFixedHeight(70)
+        self.universe_mode.addItems(("all", "onlyDo", "excludeDo"))
+        self.only_do = QTextEdit()
+        self.only_do.setFixedHeight(70)
+        self.exclude_do = QTextEdit()
+        self.exclude_do.setFixedHeight(70)
         self.exchange_ids = QLineEdit()
         self.min_volume = _spin(0, 1_000_000_000)
         self.min_open_interest = _spin(0, 1_000_000_000)
         form.addRow("模式", self.universe_mode)
-        form.addRow("标的", self.underlyings)
-        form.addRow("指定合约", self.symbols)
+        form.addRow("指定合约", self.only_do)
+        form.addRow("排除合约", self.exclude_do)
         form.addRow("交易所", self.exchange_ids)
         form.addRow("最小成交量", self.min_volume)
         form.addRow("最小持仓量", self.min_open_interest)
+        self.universe_mode.currentTextChanged.connect(self._update_universe_inputs)
+        self._update_universe_inputs()
         self.content_layout.addWidget(box)
 
     def _build_strategies(self) -> None:
@@ -1259,9 +1262,10 @@ class ConfigEditor(QWidget):
         self.price_basis.setText(config.runtime.price_basis)
         self.alert_on_first_match.setChecked(config.runtime.alert_on_first_match)
         self.universe_mode.setCurrentText(config.universe.mode)
-        self.underlyings.setPlainText("\n".join(config.universe.underlyings))
-        self.symbols.setPlainText("\n".join(config.universe.symbols))
+        self.only_do.setPlainText("\n".join(config.universe.only_do))
+        self.exclude_do.setPlainText("\n".join(config.universe.exclude_do))
         self.exchange_ids.setText(", ".join(config.universe.exchange_ids))
+        self._update_universe_inputs()
         self.min_volume.setValue(config.universe.min_volume)
         self.min_open_interest.setValue(config.universe.min_open_interest)
         self.strategies.setRowCount(0)
@@ -1331,8 +1335,8 @@ class ConfigEditor(QWidget):
             },
             "universe": {
                 "mode": self.universe_mode.currentText(),
-                "underlyings": _split_lines(self.underlyings.toPlainText()),
-                "symbols": _split_lines(self.symbols.toPlainText()),
+                "only_do": _split_lines(self.only_do.toPlainText()),
+                "exclude_do": _split_lines(self.exclude_do.toPlainText()),
                 "exchange_ids": _split_csv(self.exchange_ids.text()),
                 "min_volume": self.min_volume.value(),
                 "min_open_interest": self.min_open_interest.value(),
@@ -1393,6 +1397,18 @@ class ConfigEditor(QWidget):
                 "cycle_summary_interval_seconds": self.cycle_summary_interval_seconds.value(),
             },
         }
+
+    def _update_universe_inputs(self) -> None:
+        mode = self.universe_mode.currentText()
+        self._set_universe_row_visible(self.exchange_ids, mode == "all")
+        self._set_universe_row_visible(self.only_do, mode == "onlyDo")
+        self._set_universe_row_visible(self.exclude_do, mode == "excludeDo")
+
+    def _set_universe_row_visible(self, widget: QWidget, visible: bool) -> None:
+        label = self._universe_form.labelForField(widget)
+        if label is not None:
+            label.setVisible(visible)
+        widget.setVisible(visible)
 
     def _strategy_data(self) -> list[dict[str, Any]]:
         rows = []

@@ -146,9 +146,9 @@ class LivePriceCacheTests(unittest.TestCase):
         data_source.config = SimpleNamespace(
             runtime=SimpleNamespace(mode="live"),
             universe=SimpleNamespace(
-                mode="underlyings",
-                underlyings=("SHFE.au2608",),
-                symbols=(),
+                mode="onlyDo",
+                only_do=("SHFE.au2608",),
+                exclude_do=(),
                 exchange_ids=(),
             ),
             tqsdk=SimpleNamespace(
@@ -438,8 +438,13 @@ class _FakeApi:
         self.close_count = 0
         self.quote_list_calls: tuple[tuple[str, ...], ...] = ()
 
-    def query_options(self, underlying: str, expired: bool = False) -> list[str]:
-        return [f"{underlying}C600", f"{underlying}P600"]
+    def query_quotes(self, **kwargs) -> list[str]:
+        ins_class = kwargs.get("ins_class")
+        if ins_class == "FUTURE":
+            return ["SHFE.au2608"]
+        if ins_class == "OPTION":
+            return ["SHFE.au2608C600", "SHFE.au2608P600"]
+        return []
 
     def query_symbol_info(self, symbols: list[str]) -> "_FakeSymbolInfoFrame":
         return _FakeSymbolInfoFrame(symbols)

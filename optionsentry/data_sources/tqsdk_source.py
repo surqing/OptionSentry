@@ -107,32 +107,45 @@ class TqSdkDataSource:
     def _discover_option_symbols(self, api: Any) -> list[str]:
         universe_config = self.config.universe
         if universe_config.mode == "all":
-            exchange_ids = list(universe_config.exchange_ids) or [None]
-            symbols: list[str] = []
-            for exchange_id in exchange_ids:
-                kwargs = {"ins_class": "OPTION", "expired": False}
-                if exchange_id:
-                    kwargs["exchange_id"] = exchange_id
-                symbols.extend(list(api.query_quotes(**kwargs)))
-            return sorted(set(symbols))
+            return self._discover_active_symbols(api, "OPTION", universe_config.exchange_ids)
 
-        if universe_config.mode == "underlyings":
-            symbols = []
-            for underlying in universe_config.underlyings:
-                symbols.extend(list(api.query_options(tqsdk_api_symbol(underlying), expired=False)))
-            return sorted(set(symbols))
+        option_symbols = self._discover_active_symbols(api, "OPTION")
+        future_symbols = self._discover_active_symbols(api, "FUTURE")
+        metas = self._query_metas(api, sorted(set(option_symbols) | set(future_symbols)))
+        if universe_config.mode == "onlyDo":
+            symbols = _filter_option_symbols_by_terms(metas, universe_config.only_do, exclude=False)
+            self.logger.info(
+                "Applied universe onlyDo filter: terms=%s options %s -> %s.",
+                universe_config.only_do,
+                len([meta for meta in metas.values() if meta.is_option]),
+                len(symbols),
+            )
+            return symbols
+        if universe_config.mode == "excludeDo":
+            symbols = _filter_option_symbols_by_terms(metas, universe_config.exclude_do, exclude=True)
+            self.logger.info(
+                "Applied universe excludeDo filter: terms=%s options %s -> %s.",
+                universe_config.exclude_do,
+                len([meta for meta in metas.values() if meta.is_option]),
+                len(symbols),
+            )
+            return symbols
+        raise ConfigError(f"Unsupported universe mode: {universe_config.mode}")
 
-        provided_metas = self._query_metas(api, universe_config.symbols)
-        option_symbols = {symbol for symbol, meta in provided_metas.items() if meta.is_option}
-        underlying_symbols = {
-            symbol for symbol, meta in provided_metas.items() if meta.is_future or _looks_like_future_symbol(symbol)
-        }
-        for option in provided_metas.values():
-            if option.is_option and option.underlying_symbol:
-                underlying_symbols.add(option.underlying_symbol)
-        for underlying in sorted(underlying_symbols):
-            option_symbols.update(api.query_options(tqsdk_api_symbol(underlying), expired=False))
-        return sorted(option_symbols)
+    def _discover_active_symbols(
+        self,
+        api: Any,
+        ins_class: str,
+        exchange_ids: tuple[str, ...] = (),
+    ) -> list[str]:
+        exchanges = list(exchange_ids) or [None]
+        symbols: list[str] = []
+        for exchange_id in exchanges:
+            kwargs = {"ins_class": ins_class, "expired": False}
+            if exchange_id:
+                kwargs["exchange_id"] = exchange_id
+            symbols.extend(list(api.query_quotes(**kwargs)))
+        return sorted(set(symbols))
 
     def _query_metas(self, api: Any, symbols: list[str] | tuple[str, ...]) -> dict[str, InstrumentMeta]:
         if not symbols:
@@ -828,6 +841,56 @@ def _looks_like_future_symbol(symbol: str) -> bool:
     return exchange in FUTURE_EXCHANGES
 
 
+def _filter_option_symbols_by_terms(
+    metas: dict[str, InstrumentMeta],
+    terms: tuple[str, ...],
+    *,
+    exclude: bool,
+) -> list[str]:
+    matched_symbols = {
+        symbol
+        for symbol, meta in metas.items()
+        if _instrument_matches_terms(meta, terms)
+    }
+    matched_underlyings = {
+        symbol
+        for symbol, meta in metas.items()
+        if symbol in matched_symbols and (meta.is_future or _looks_like_future_symbol(symbol))
+    }
+    selected = []
+    for symbol, meta in metas.items():
+        if not meta.is_option:
+            continue
+        matched = symbol in matched_symbols or (
+            bool(meta.underlying_symbol) and meta.underlying_symbol in matched_underlyings
+        )
+        if matched != exclude:
+            selected.append(symbol)
+    return sorted(selected)
+
+
+def _instrument_matches_terms(meta: InstrumentMeta, terms: tuple[str, ...]) -> bool:
+    haystacks = (
+        meta.symbol,
+        meta.api_symbol,
+        meta.underlying_symbol,
+        meta.api_underlying_symbol,
+        meta.product_id,
+        meta.instrument_name,
+    )
+    normalized_haystacks = tuple(_match_text(value) for value in haystacks if str(value).strip())
+    return any(
+        term_text in haystack
+        for term in terms
+        if (term_text := _match_text(term))
+        for haystack in normalized_haystacks
+    )
+
+
+def _match_text(value: object) -> str:
+    return str(value).strip().upper()
+
+
 def _api_symbols_by_internal_symbol(universe_or_metas: Universe | dict[str, InstrumentMeta]) -> dict[str, str]:
     metas = (
         universe_or_metas.instruments.values()
@@ -859,7 +922,7 @@ def _validate_live_subscription_size(symbols: list[str]) -> None:
         "预处理后需要订阅的合约数量过多，已停止本次预警系统启动。\n\n"
         f"当前需要订阅 {len(symbols)} 个合约，最大允许 {MAX_LIVE_SUBSCRIPTION_SYMBOLS} 个。\n\n"
         "请通过以下方式降低订阅数：\n"
-        "- 将合约范围模式从 all 改为 underlyings，只填写需要监控的标的期货。\n"
+        "- 将合约范围模式从 all 改为 onlyDo，只填写需要监控的品种或合约关键字。\n"
         "- 缩小 exchange_ids，只扫描必要交易所。\n"
         "- 提高 min_volume 或 min_open_interest，过滤低流动性期权。\n"
         "- 减少要监控的到期月份或标的范围。"
