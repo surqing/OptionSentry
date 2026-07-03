@@ -168,6 +168,31 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(main_window.config_editor.strategies.item(0, 7).text(), "options")
         main_window.config_editor.strategies.item(0, 5).setText("filters/gold.py")
         self.assertEqual(main_window.config_editor.build_config().strategies[0].filter_script, "filters/gold.py")
+        self.assertEqual(
+            [
+                main_window.config_editor.strategy_type_to_add.itemData(index)
+                for index in range(main_window.config_editor.strategy_type_to_add.count())
+            ],
+            ["cp_combo", "abs_spread"],
+        )
+        self.assertEqual(
+            [
+                main_window.config_editor.strategy_type_to_add.itemText(index)
+                for index in range(main_window.config_editor.strategy_type_to_add.count())
+            ],
+            ["CP组合预警", "价差预警"],
+        )
+        main_window.config_editor.strategy_type_to_add.setCurrentIndex(
+            main_window.config_editor.strategy_type_to_add.findData("abs_spread")
+        )
+        row_count = main_window.config_editor.strategies.rowCount()
+        main_window.config_editor.add_strategy_button.click()
+        self.assertEqual(main_window.config_editor.strategies.rowCount(), row_count + 1)
+        added = main_window.config_editor.build_config().strategies[-1]
+        self.assertEqual(added.type, "abs_spread")
+        self.assertEqual(added.min_value, float("-inf"))
+        self.assertEqual(added.max_value, 0.1)
+        self.assertTrue(added.selected)
         self.assertIn("QTableWidget::item:hover", app.styleSheet())
         self.assertEqual(
             _format_table_timestamp("2026-06-26 23:41:05.000000"),
@@ -206,6 +231,7 @@ class GuiSmokeTests(unittest.TestCase):
         for combo in (
             main_window.config_editor.runtime_mode,
             main_window.config_editor.universe_mode,
+            main_window.config_editor.strategy_type_to_add,
         ):
             combo.ensurePolished()
             combo.view().ensurePolished()

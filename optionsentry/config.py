@@ -71,12 +71,17 @@ DEFAULT_STRATEGY_DISPLAY_NAMES = {
     "cp_combo": "CP组合预警",
     "abs_spread": "价差预警",
 }
+SUPPORTED_STRATEGY_TYPES = tuple(DEFAULT_STRATEGY_DISPLAY_NAMES)
+
+
+def strategy_type_display_name(strategy_type: str) -> str:
+    return DEFAULT_STRATEGY_DISPLAY_NAMES.get(strategy_type, strategy_type)
 
 
 def strategy_display_name(strategy: StrategyConfig) -> str:
     if strategy.name:
         return strategy.name
-    return DEFAULT_STRATEGY_DISPLAY_NAMES.get(strategy.type, strategy.type)
+    return strategy_type_display_name(strategy.type)
 
 
 @dataclass(frozen=True)
@@ -450,7 +455,7 @@ def _validate_config(
     if not strategies:
         raise ConfigError("At least one [[strategies]] entry is required.")
     for strategy in strategies:
-        if strategy.type not in {"cp_combo", "abs_spread"}:
+        if strategy.type not in SUPPORTED_STRATEGY_TYPES:
             raise ConfigError(f"Unsupported strategy type: {strategy.type}")
         if strategy.filter_scope != "options":
             raise ConfigError(f"Strategy filter_scope must be 'options': {strategy.type}")

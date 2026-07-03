@@ -42,7 +42,15 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from optionsentry.config import AppConfig, ActiveAlertsViewConfig, ConfigError, load_config, strategy_display_name
+from optionsentry.config import (
+    AppConfig,
+    ActiveAlertsViewConfig,
+    ConfigError,
+    SUPPORTED_STRATEGY_TYPES,
+    load_config,
+    strategy_display_name,
+    strategy_type_display_name,
+)
 from optionsentry.gui.config_store import data_to_config, save_config
 from optionsentry.gui.credentials import CredentialResolution, load_and_validate_login
 from optionsentry.gui.runner_adapter import GuiRunSignals, build_gui_runner
@@ -1251,16 +1259,20 @@ class ConfigEditor(QWidget):
         box = QGroupBox("策略")
         layout = QVBoxLayout(box)
         row = QHBoxLayout()
-        add_button = QPushButton("添加")
-        add_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
-        add_button.clicked.connect(lambda: self._add_strategy_row("cp_combo", 0.01, math.inf, "", True))
+        self.strategy_type_to_add = NoWheelComboBox()
+        for strategy_type in SUPPORTED_STRATEGY_TYPES:
+            self.strategy_type_to_add.addItem(strategy_type_display_name(strategy_type), strategy_type)
+        self.add_strategy_button = QPushButton("添加")
+        self.add_strategy_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
+        self.add_strategy_button.clicked.connect(self._add_selected_strategy_row)
         remove_button = QPushButton("删除")
         remove_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
         remove_button.clicked.connect(self._remove_strategy_row)
         script_button = QPushButton("选择脚本")
         script_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
         script_button.clicked.connect(self._browse_strategy_filter_script)
-        row.addWidget(add_button)
+        row.addWidget(self.strategy_type_to_add)
+        row.addWidget(self.add_strategy_button)
         row.addWidget(remove_button)
         row.addWidget(script_button)
         row.addStretch(1)
@@ -1588,6 +1600,11 @@ class ConfigEditor(QWidget):
             _restore_table_sort(self.strategies)
             _apply_table_filters(self.strategies)
 
+    def _add_selected_strategy_row(self) -> None:
+        strategy_type = str(self.strategy_type_to_add.currentData() or self.strategy_type_to_add.currentText())
+        min_value, max_value = _default_strategy_range(strategy_type)
+        self._add_strategy_row(strategy_type, min_value, max_value, "", True)
+
     def _browse_strategy_filter_script(self) -> None:
         row = self.strategies.currentRow()
         if row < 0:
@@ -1860,6 +1877,12 @@ def _format_bound(value: float) -> str:
     if math.isinf(value):
         return "inf" if value > 0 else "-inf"
     return f"{value:g}"
+
+
+def _default_strategy_range(strategy_type: str) -> tuple[float, float]:
+    if strategy_type == "abs_spread":
+        return -math.inf, 0.1
+    return 0.01, math.inf
 
 
 def _split_csv(value: str) -> list[str]:
