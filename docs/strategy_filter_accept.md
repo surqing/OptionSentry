@@ -25,7 +25,7 @@ def accept(option, ctx) -> bool:
 
 ## option 字段
 
-`option` 是只读 `InstrumentMeta` 对象。类型中的 `| None` 表示字段可能缺失，使用前应先判空。
+`option` 是只读 `InstrumentMeta` 对象。类型中的 `Optional[...]` 表示字段可能缺失，使用前应先判空。
 
 ### 合约身份
 
@@ -40,7 +40,7 @@ def accept(option, ctx) -> bool:
 | `ins_class` | `str` | 合约类型。传入 `accept` 的对象通常为 `OPTION`。 |
 | `is_option` | `bool` | 是否为期权。当前通常为 `True`。 |
 | `is_future` | `bool` | 是否为期货。传入 `accept` 的 `option` 通常为 `False`。 |
-| `expired` | `bool | None` | 合约是否已下市。`True` 表示该合约已经不属于正常未下市合约范围；期权到期日期或剩余天数应使用 `expire_date`、`expire_datetime`、`expire_rest_days` 或 `last_exercise_date` 判断。 |
+| `expired` | `Optional[bool]` | 合约是否已下市。`True` 表示该合约已经不属于正常未下市合约范围；期权到期日期或剩余天数应使用 `expire_date`、`expire_datetime`、`expire_rest_days` 或 `last_exercise_date` 判断。 |
 
 ### 期权属性
 
@@ -48,49 +48,49 @@ def accept(option, ctx) -> bool:
 | --- | --- | --- |
 | `underlying_symbol` | `str` | 标的期货的系统内部代码，例如 `SHFE.AU2608`。 |
 | `api_underlying_symbol` | `str` | 标的期货的 TqSdk 原始风格代码，例如 `SHFE.au2608`。 |
-| `strike_price` | `float | None` | 行权价。 |
+| `strike_price` | `Optional[float]` | 行权价。 |
 | `option_class` | `str` | 期权方向，通常为 `CALL` 或 `PUT`。 |
 
 ### 到期和行权
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `exercise_year` | `int | None` | 期权最后行权日年份，例如 `2026`。 |
-| `exercise_month` | `int | None` | 期权最后行权日月份，例如 `8`。 |
+| `exercise_year` | `Optional[int]` | 期权最后行权日年份，例如 `2026`。 |
+| `exercise_month` | `Optional[int]` | 期权最后行权日月份，例如 `8`。 |
 | `expiry_key` | `str` | 系统派生的行权年月文本，例如 `2026-8`；缺失时对应部分显示为 `NA`。 |
-| `expire_datetime` | `float | None` | 到期日 Unix 秒级时间戳。 |
-| `expire_date` | `datetime.date | None` | 系统由 `expire_datetime` 转换出的到期日期。 |
-| `expire_rest_days` | `int | None` | 距到期日剩余自然日天数。 |
-| `last_exercise_datetime` | `float | None` | 最后行权日 Unix 秒级时间戳。 |
-| `last_exercise_date` | `datetime.date | None` | 系统由 `last_exercise_datetime` 转换出的最后行权日期。 |
-| `delivery_year` | `int | None` | 期货交割日年份。对期权筛选通常优先使用 `exercise_year`。 |
-| `delivery_month` | `int | None` | 期货交割日月份。对期权筛选通常优先使用 `exercise_month`。 |
+| `expire_datetime` | `Optional[float]` | 到期日 Unix 秒级时间戳。 |
+| `expire_date` | `Optional[datetime.date]` | 系统由 `expire_datetime` 转换出的到期日期。 |
+| `expire_rest_days` | `Optional[int]` | 距到期日剩余自然日天数。 |
+| `last_exercise_datetime` | `Optional[float]` | 最后行权日 Unix 秒级时间戳。 |
+| `last_exercise_date` | `Optional[datetime.date]` | 系统由 `last_exercise_datetime` 转换出的最后行权日期。 |
+| `delivery_year` | `Optional[int]` | 期货交割日年份。对期权筛选通常优先使用 `exercise_year`。 |
+| `delivery_month` | `Optional[int]` | 期货交割日月份。对期权筛选通常优先使用 `exercise_month`。 |
 
 ### 合约规格和下单限制
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `price_tick` | `float | None` | 最小变动价位。 |
-| `volume_multiple` | `float | None` | 合约乘数。 |
-| `open_limit` | `float | None` | 日内开仓限额。 |
-| `max_limit_order_volume` | `float | None` | 限价单最大下单手数。 |
-| `max_market_order_volume` | `float | None` | 市价单最大下单手数。 |
-| `min_limit_order_volume` | `float | None` | 限价单最小下单手数。 |
-| `min_market_order_volume` | `float | None` | 市价单最小下单手数。 |
-| `open_max_limit_order_volume` | `float | None` | 开仓限价单最大手数。 |
-| `open_max_market_order_volume` | `float | None` | 开仓市价单最大手数。 |
-| `open_min_limit_order_volume` | `float | None` | 开仓限价单最小手数。 |
-| `open_min_market_order_volume` | `float | None` | 开仓市价单最小手数。 |
+| `price_tick` | `Optional[float]` | 最小变动价位。 |
+| `volume_multiple` | `Optional[float]` | 合约乘数。 |
+| `open_limit` | `Optional[float]` | 日内开仓限额。 |
+| `max_limit_order_volume` | `Optional[float]` | 限价单最大下单手数。 |
+| `max_market_order_volume` | `Optional[float]` | 市价单最大下单手数。 |
+| `min_limit_order_volume` | `Optional[float]` | 限价单最小下单手数。 |
+| `min_market_order_volume` | `Optional[float]` | 市价单最小下单手数。 |
+| `open_max_limit_order_volume` | `Optional[float]` | 开仓限价单最大手数。 |
+| `open_max_market_order_volume` | `Optional[float]` | 开仓市价单最大手数。 |
+| `open_min_limit_order_volume` | `Optional[float]` | 开仓限价单最小手数。 |
+| `open_min_market_order_volume` | `Optional[float]` | 开仓市价单最小手数。 |
 
 ### 参考价格
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `upper_limit` | `float | None` | 涨停价。 |
-| `lower_limit` | `float | None` | 跌停价。 |
-| `pre_settlement` | `float | None` | 昨结算。 |
-| `pre_open_interest` | `float | None` | 昨持仓。 |
-| `pre_close` | `float | None` | 昨收盘。 |
+| `upper_limit` | `Optional[float]` | 涨停价。 |
+| `lower_limit` | `Optional[float]` | 跌停价。 |
+| `pre_settlement` | `Optional[float]` | 昨结算。 |
+| `pre_open_interest` | `Optional[float]` | 昨持仓。 |
+| `pre_close` | `Optional[float]` | 昨收盘。 |
 
 ### 交易时段
 
@@ -103,8 +103,8 @@ def accept(option, ctx) -> bool:
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `volume` | `float | None` | 兼容字段，当前策略级 `accept` 中通常为空，不建议用于筛选。 |
-| `open_interest` | `float | None` | 兼容字段，当前策略级 `accept` 中通常为空，不建议用于筛选。 |
+| `volume` | `Optional[float]` | 兼容字段，当前策略级 `accept` 中通常为空，不建议用于筛选。 |
+| `open_interest` | `Optional[float]` | 兼容字段，当前策略级 `accept` 中通常为空，不建议用于筛选。 |
 
 ## ctx 方法
 
