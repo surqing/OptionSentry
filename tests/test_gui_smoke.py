@@ -459,6 +459,18 @@ class GuiSmokeTests(unittest.TestCase):
             CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
         )
 
+        main_window.active_view.set_strategy_filter("CP组合预警")
+        self.assertEqual(
+            _table_headers(main_window.active_table),
+            ("时间", "值", "C虚实度", "P虚实度", "预警范围", "合约"),
+        )
+        main_window.active_view.set_strategy_filter("价差预警")
+        self.assertEqual(
+            _table_headers(main_window.active_table),
+            ("时间", "值", "虚实度A", "虚实度B", "平均虚实度", "预警范围", "合约"),
+        )
+        main_window.active_view.set_strategy_filter(None)
+
         main_window._on_cycle(
             RunnerCycle(
                 cycle_count=1,

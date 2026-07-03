@@ -7,7 +7,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from PyQt6.QtCore import QEasingCurve, QObject, QPropertyAnimation, QRect, QTimer, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QIcon
@@ -784,8 +784,13 @@ class MainWindow(QMainWindow):
         )
 
     def _set_strategy_filters(self, config: AppConfig) -> None:
-        strategy_names = [strategy_display_name(strategy) for strategy in config.selected_strategies]
-        self.active_view.set_strategy_names(strategy_names)
+        strategy_names: list[str] = []
+        strategy_types_by_name: dict[str, set[str]] = {}
+        for strategy in config.selected_strategies:
+            strategy_name = strategy_display_name(strategy)
+            strategy_names.append(strategy_name)
+            strategy_types_by_name.setdefault(strategy_name, set()).add(strategy.type)
+        self.active_view.set_strategy_names(strategy_names, strategy_types_by_name)
         self.alert_view.set_strategy_names(strategy_names)
 
     def _save_config(self) -> None:
@@ -925,6 +930,7 @@ class StrategyEvaluationTable(QGroupBox):
         self._configured_strategy_names: tuple[str, ...] = ()
         self._strategy_names: tuple[str, ...] = ()
         self._selected_strategy: str | None = None
+        self._strategy_types_by_name: dict[str, set[str]] = {}
         self._records: list[_EvaluationRecord] = []
         self._buttons: dict[str | None, QPushButton] = {}
         self._table_shape: tuple[bool, tuple[str, ...]] | None = None
@@ -945,8 +951,16 @@ class StrategyEvaluationTable(QGroupBox):
         self._rebuild_filter_buttons()
         self._render()
 
-    def set_strategy_names(self, strategy_names: Iterable[str]) -> None:
+    def set_strategy_names(
+        self,
+        strategy_names: Iterable[str],
+        strategy_types_by_name: Mapping[str, Iterable[str]] | None = None,
+    ) -> None:
         self._configured_strategy_names = _unique_names(strategy_names)
+        self._strategy_types_by_name = {
+            str(strategy_name): set(map(str, strategy_types))
+            for strategy_name, strategy_types in (strategy_types_by_name or {}).items()
+        }
         self._sync_strategy_buttons()
         self._render()
 
@@ -1040,6 +1054,15 @@ class StrategyEvaluationTable(QGroupBox):
     def _metric_columns(self, records: list[_EvaluationRecord], include_strategy: bool) -> tuple[str, ...]:
         if include_strategy or not self._show_moneyness_columns:
             return ()
+        strategy_types = self._strategy_types_by_name.get(self._selected_strategy or "", set())
+        if strategy_types == {"cp_combo"}:
+            return (CALL_MONEYNESS_METRIC, PUT_MONEYNESS_METRIC)
+        if strategy_types == {"abs_spread"}:
+            return (
+                SPREAD_A_MONEYNESS_METRIC,
+                SPREAD_B_MONEYNESS_METRIC,
+                SPREAD_AVG_MONEYNESS_METRIC,
+            )
         metric_names = {
             metric_name
             for record in records
