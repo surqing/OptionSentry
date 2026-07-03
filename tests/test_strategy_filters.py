@@ -37,13 +37,45 @@ class StrategyFilterTests(unittest.TestCase):
             self.assertEqual({option.symbol for option in filtered.options}, {"SHFE.AU2608C600", "SHFE.AU2608P600"})
             self.assertEqual({future.symbol for future in filtered.futures}, {"SHFE.AU2608"})
 
+    def test_filter_logs_script_and_range_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            script = config_dir / "gold.py"
+            script.write_text(
+                "def accept(option, ctx):\n    return option.strike_price == 600\n",
+                encoding="utf-8",
+            )
+            strategy = CPComboStrategy(
+                min_value=0.01,
+                max_value=float("inf"),
+                name="filtered",
+                filter_script="gold.py",
+            )
+            handler = CapturingLogHandler()
+            logger = _logger(handler)
+            logger.setLevel(logging.INFO)
+
+            apply_strategy_filter(strategy, sample_universe(), config_dir, logger)
+
+            self.assertTrue(any("strategy=filtered" in message for message in handler.messages))
+            self.assertTrue(any(f"script={script.resolve()}" in message for message in handler.messages))
+            self.assertTrue(any("function=accept" in message for message in handler.messages))
+            self.assertTrue(any("options=4->2" in message for message in handler.messages))
+            self.assertTrue(any("futures=1->1" in message for message in handler.messages))
+            self.assertTrue(any("price_symbols=5->3" in message for message in handler.messages))
+
     def test_filter_returns_universe_unchanged_when_no_script_is_set(self) -> None:
         universe = sample_universe()
         strategy = CPComboStrategy(min_value=0.01, max_value=float("inf"), name="plain")
+        handler = CapturingLogHandler()
+        logger = _logger(handler)
+        logger.setLevel(logging.INFO)
 
-        filtered = apply_strategy_filter(strategy, universe, ".", _logger())
+        filtered = apply_strategy_filter(strategy, universe, ".", logger)
 
         self.assertIs(filtered, universe)
+        self.assertTrue(any("Strategy filter skipped" in message for message in handler.messages))
+        self.assertTrue(any("script=<none>" in message for message in handler.messages))
 
     def test_filter_rejects_missing_function_non_bool_and_runtime_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -87,9 +119,18 @@ class StrategyFilterTests(unittest.TestCase):
                 apply_strategy_filter(strategy, sample_universe(), config_dir, _logger())
 
 
-def _logger() -> logging.Logger:
+class CapturingLogHandler(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
+def _logger(handler: logging.Handler | None = None) -> logging.Logger:
     logger = logging.getLogger("tests.strategy_filters")
-    logger.handlers = [logging.NullHandler()]
+    logger.handlers = [handler or logging.NullHandler()]
     logger.propagate = False
     return logger
 

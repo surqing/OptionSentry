@@ -33,6 +33,18 @@ def apply_strategy_filter(
 ) -> Universe:
     script = getattr(strategy, "filter_script", None)
     if not script:
+        logger.info(
+            (
+                "Strategy filter skipped: strategy=%s script=<none> function=%s scope=%s "
+                "options=%s futures=%s price_symbols=%s"
+            ),
+            strategy.name,
+            getattr(strategy, "filter_function", "accept"),
+            getattr(strategy, "filter_scope", "options"),
+            len(universe.options),
+            len(universe.futures),
+            len(universe.price_symbols()),
+        )
         return universe
     scope = getattr(strategy, "filter_scope", "options")
     if scope != "options":
@@ -82,12 +94,20 @@ def apply_strategy_filter(
         instruments[option.symbol] = option
     filtered = Universe(instruments=instruments, requested_symbols=tuple(sorted(instruments)))
     logger.info(
-        "Applied strategy filter: strategy=%s script=%s options %s -> %s futures=%s",
+        (
+            "Applied strategy filter: strategy=%s script=%s function=%s scope=%s "
+            "options=%s->%s futures=%s->%s price_symbols=%s->%s"
+        ),
         strategy.name,
         script_path,
+        function_name,
+        scope,
         len(universe.options),
         len(filtered.options),
+        len(universe.futures),
         len(filtered.futures),
+        len(universe.price_symbols()),
+        len(filtered.price_symbols()),
     )
     return filtered
 

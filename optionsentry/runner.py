@@ -184,22 +184,51 @@ class AlertRunner:
             filtered_universe = apply_strategy_filter(strategy, universe, self.config_dir, self.logger)
             if not filtered_universe.options:
                 self.logger.warning(
-                    "Skipping strategy with no options after filter: strategy=%s",
+                    "Skipping strategy with no options after filter: strategy=%s script=%s",
                     strategy.name,
+                    getattr(strategy, "filter_script", None) or "<none>",
                 )
                 continue
             compiled = strategy.compile(filtered_universe)
             if compiled.condition_count == 0:
                 self.logger.warning(
-                    "Skipping strategy with no compiled conditions: strategy=%s options=%s futures=%s",
+                    (
+                        "Skipping strategy with no compiled conditions: strategy=%s script=%s "
+                        "options=%s futures=%s price_symbols=%s"
+                    ),
                     strategy.name,
+                    getattr(strategy, "filter_script", None) or "<none>",
                     len(filtered_universe.options),
                     len(filtered_universe.futures),
+                    len(filtered_universe.price_symbols()),
                 )
                 continue
+            self.logger.info(
+                (
+                    "Strategy compiled after filter: strategy=%s script=%s conditions=%s "
+                    "options=%s futures=%s price_symbols=%s"
+                ),
+                strategy.name,
+                getattr(strategy, "filter_script", None) or "<none>",
+                compiled.condition_count,
+                len(filtered_universe.options),
+                len(filtered_universe.futures),
+                len(filtered_universe.price_symbols()),
+            )
             compiled_strategies.append(compiled)
             active_universes.append(filtered_universe)
-        return tuple(compiled_strategies), _merge_universes(active_universes)
+        stream_universe = _merge_universes(active_universes)
+        self.logger.info(
+            (
+                "Monitoring universe after strategy filters: strategies=%s options=%s "
+                "futures=%s price_symbols=%s"
+            ),
+            len(compiled_strategies),
+            len(stream_universe.options),
+            len(stream_universe.futures),
+            len(stream_universe.price_symbols()),
+        )
+        return tuple(compiled_strategies), stream_universe
 
     def _notify(self, event: AlertEvent) -> None:
         self.logger.warning("alert key=%s message=%s", event.evaluation.key, event.evaluation.message)

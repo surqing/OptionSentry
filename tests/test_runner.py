@@ -257,6 +257,10 @@ class RunnerTests(unittest.TestCase):
             universe = sample_universe()
             data_source = FakeDataSource(universe, ())
             compiled: list[tuple[int, int]] = []
+            handler = CapturingLogHandler()
+            logger = _logger("tests.runner.filtered_union")
+            logger.handlers = [handler]
+            logger.setLevel(logging.INFO)
             runner = AlertRunner(
                 data_source=data_source,
                 strategies=(
@@ -275,7 +279,7 @@ class RunnerTests(unittest.TestCase):
                 ),
                 alert_engine=AlertEngine(),
                 notifier=CapturingNotifier([]),
-                logger=_logger("tests.runner.filtered_union"),
+                logger=logger,
                 config_dir=config_dir,
                 callbacks=RunnerCallbacks(on_compiled=lambda count, total: compiled.append((count, total))),
             )
@@ -291,6 +295,12 @@ class RunnerTests(unittest.TestCase):
                 "SHFE.AU2608P620",
             })
             self.assertEqual({future.symbol for future in data_source.stream_universe.futures}, {"SHFE.AU2608"})
+            self.assertTrue(any("Strategy compiled after filter: strategy=strike_600" in message for message in handler.messages))
+            self.assertTrue(any("Strategy compiled after filter: strategy=strike_620" in message for message in handler.messages))
+            self.assertTrue(any(
+                "Monitoring universe after strategy filters: strategies=2 options=4 futures=1 price_symbols=5" in message
+                for message in handler.messages
+            ))
 
     def test_runner_skips_empty_strategy_and_continues_with_valid_strategy(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
