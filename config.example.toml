@@ -29,8 +29,9 @@ min_value = 0.01
 max_value = inf
 name = "CP组合正向预警"
 selected = true
-# Optional per-strategy option filter script. Relative paths resolve from this config file.
-# filter_script = "filters/gold_options.py"
+# Optional per-strategy option filter script. Absolute paths are safest.
+# Relative paths are still supported and resolve from this config file.
+# filter_script = "C:/path/to/filter_scripts/gold_options.py"
 # filter_function = "accept"
 # filter_scope = "options"
 

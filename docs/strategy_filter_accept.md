@@ -20,7 +20,9 @@ filter_scope = "options"
 
 说明：
 
-- `filter_script` 是 Python 脚本路径。相对路径按当前配置文件所在目录解析，不按启动命令所在目录解析。
+- `filter_script` 是 Python 脚本路径。最保险的写法是使用绝对路径，例如 `H:/Project/KuaiQi/configure/filter_scripts/by_expiry.py`。
+- GUI 的“选择脚本”按钮会自动写入绝对路径，脚本不需要位于配置文件所在目录或其子目录。
+- 手工编辑配置时也可以写相对路径；相对路径按当前配置文件所在目录解析，不按启动命令所在目录解析。
 - `filter_function` 是脚本里的函数名，默认是 `accept`。
 - `filter_scope` 当前只支持 `options`。
 - 不配置 `filter_script` 的策略不会执行用户筛选脚本。

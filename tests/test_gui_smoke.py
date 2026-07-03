@@ -619,6 +619,43 @@ class GuiSmokeTests(unittest.TestCase):
         app.processEvents()
         main_window.close()
 
+    def test_strategy_filter_script_picker_stores_absolute_path(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtWidgets import QApplication
+
+        from optionsentry.config import parse_config
+        from optionsentry.gui.app import MainWindow
+        from optionsentry.gui.credentials import CredentialResolution
+
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            config_dir = tmp_path / "configure"
+            config_dir.mkdir()
+            config_path = config_dir / "config.toml"
+            script_path = tmp_path / "outside_filters" / "expiry.py"
+            script_path.parent.mkdir()
+            script_path.write_text("def accept(option, ctx):\n    return True\n", encoding="utf-8")
+            config = parse_config({"strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}]})
+            main_window = MainWindow(
+                config_path,
+                config,
+                CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
+            )
+            main_window.config_editor.strategies.setCurrentCell(0, 5)
+
+            with patch(
+                "optionsentry.gui.app.QFileDialog.getOpenFileName",
+                return_value=(str(script_path), "Python (*.py)"),
+            ):
+                main_window.config_editor._browse_strategy_filter_script()
+
+            expected = str(script_path.resolve())
+            self.assertEqual(main_window.config_editor.strategies.item(0, 5).text(), expected)
+            self.assertEqual(main_window.config_editor.build_config().strategies[0].filter_script, expected)
+            app.processEvents()
+            main_window.close()
+
     def test_active_table_auto_refresh_uses_cached_cycles(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication

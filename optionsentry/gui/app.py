@@ -1602,14 +1602,7 @@ class ConfigEditor(QWidget):
         )
         if not path:
             return
-        script_path = Path(path).resolve()
-        try:
-            display_path = str(script_path.relative_to(self._config_dir))
-        except ValueError:
-            try:
-                display_path = os.path.relpath(script_path, self._config_dir)
-            except ValueError:
-                display_path = str(script_path)
+        display_path = str(Path(path).resolve())
         item = self.strategies.item(row, 5)
         if item is None:
             item = _table_item(display_path, sort_key=display_path.casefold())
