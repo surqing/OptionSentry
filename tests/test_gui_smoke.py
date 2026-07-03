@@ -247,6 +247,9 @@ class GuiSmokeTests(unittest.TestCase):
         )
         self.assertEqual(main_window.status_labels["timestamp"].text(), "2026-06-26 23:41:05.9")
         self.assertIn("策略名", _table_headers(main_window.active_table))
+        for header in ("C虚实度", "P虚实度", "虚实度A", "虚实度B", "平均虚实度"):
+            self.assertIn(header, _table_headers(main_window.active_table))
+            self.assertNotIn(header, _table_headers(main_window.alert_table))
         self.assertNotIn("消息", _table_headers(main_window.active_table))
         self.assertEqual(main_window.active_table.rowCount(), 2)
         self.assertEqual(main_window.active_table.item(0, 2).text(), "1.00000000")
@@ -423,6 +426,88 @@ class GuiSmokeTests(unittest.TestCase):
             (CP_NEGATIVE_VALUE_COLOR,) * main_window.active_table.columnCount(),
         )
         self.assertFalse(_row_has_custom_background(main_window.active_table, 1))
+        main_window.close()
+
+    def test_active_table_displays_moneyness_metrics_by_strategy(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtWidgets import QApplication
+
+        from optionsentry.config import parse_config
+        from optionsentry.gui.app import MainWindow, _set_table_filter_text
+        from optionsentry.gui.credentials import CredentialResolution
+        from optionsentry.runner import RunnerCycle
+        from optionsentry.strategies import (
+            CALL_MONEYNESS_METRIC,
+            PUT_MONEYNESS_METRIC,
+            SPREAD_A_MONEYNESS_METRIC,
+            SPREAD_AVG_MONEYNESS_METRIC,
+            SPREAD_B_MONEYNESS_METRIC,
+        )
+
+        app = QApplication.instance() or QApplication([])
+        config = parse_config(
+            {
+                "strategies": [
+                    {"type": "cp_combo", "min_value": 0.01, "max_value": float("inf"), "name": "CP组合预警"},
+                    {"type": "abs_spread", "min_value": float("-inf"), "max_value": 0.1, "name": "价差预警"},
+                ]
+            }
+        )
+        main_window = MainWindow(
+            Path("config.toml"),
+            config,
+            CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
+        )
+
+        main_window._on_cycle(
+            RunnerCycle(
+                cycle_count=1,
+                timestamp="t1",
+                evaluations=(
+                    _cp_evaluation(
+                        value=1.0,
+                        metrics={
+                            CALL_MONEYNESS_METRIC: 0.1,
+                            PUT_MONEYNESS_METRIC: -0.1,
+                        },
+                    ),
+                    _evaluation(
+                        strategy_name="价差预警",
+                        suffix="spread",
+                        value=-0.05,
+                        metrics={
+                            SPREAD_A_MONEYNESS_METRIC: 0.2,
+                            SPREAD_B_MONEYNESS_METRIC: 0.1,
+                            SPREAD_AVG_MONEYNESS_METRIC: 0.15,
+                        },
+                    ),
+                ),
+                total_conditions=2,
+                active_count=2,
+                alerts=(),
+                total_alerts=0,
+                changed_count=0,
+                compute_ms=0.0,
+            )
+        )
+
+        headers = _table_headers(main_window.active_table)
+        self.assertEqual(
+            headers,
+            ("时间", "策略名", "值", "C虚实度", "P虚实度", "虚实度A", "虚实度B", "平均虚实度", "预警范围", "合约"),
+        )
+        self.assertEqual(_table_headers(main_window.alert_table), ("时间", "策略名", "值", "预警范围", "合约"))
+        self.assertEqual(main_window.active_table.item(0, 3).text(), "0.10000000")
+        self.assertEqual(main_window.active_table.item(0, 4).text(), "-0.10000000")
+        self.assertEqual(main_window.active_table.item(0, 5).text(), "-")
+        self.assertEqual(main_window.active_table.item(1, 3).text(), "-")
+        self.assertEqual(main_window.active_table.item(1, 5).text(), "0.20000000")
+        self.assertEqual(main_window.active_table.item(1, 6).text(), "0.10000000")
+        self.assertEqual(main_window.active_table.item(1, 7).text(), "0.15000000")
+
+        _set_table_filter_text(main_window.active_table, 3, "0.09 0.11")
+        self.assertEqual(_visible_column_texts(main_window.active_table, 1), ("CP组合预警",))
+        app.processEvents()
         main_window.close()
 
     def test_table_headers_sort_rows_by_column_content(self) -> None:
@@ -800,6 +885,7 @@ def _evaluation(
     suffix: str = "eval",
     value: float = 1.0,
     active: bool = True,
+    metrics: dict[str, float] | None = None,
 ) -> ConditionEvaluation:
     return ConditionEvaluation(
         key=f"key:{strategy_name}:{suffix}",
@@ -810,10 +896,16 @@ def _evaluation(
         max_value=0.1,
         symbols=("SHFE.au2608C600", "SHFE.au2608P600", "SHFE.au2608"),
         message=f"message {suffix}",
+        metrics=metrics or {},
     )
 
 
-def _cp_evaluation(value: float, strike: int = 600, strategy_name: str = "CP组合预警") -> ConditionEvaluation:
+def _cp_evaluation(
+    value: float,
+    strike: int = 600,
+    strategy_name: str = "CP组合预警",
+    metrics: dict[str, float] | None = None,
+) -> ConditionEvaluation:
     call_symbol = f"SHFE.au2608C{strike}"
     put_symbol = f"SHFE.au2608P{strike}"
     return ConditionEvaluation(
@@ -825,6 +917,7 @@ def _cp_evaluation(value: float, strike: int = 600, strategy_name: str = "CP组�
         max_value=float("inf"),
         symbols=(call_symbol, put_symbol, "SHFE.au2608"),
         message=f"message cp {strike}",
+        metrics=metrics or {},
     )
 
 

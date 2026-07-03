@@ -92,6 +92,7 @@ class IncrementalStrategyTests(unittest.TestCase):
     def test_abs_spread_index_limits_changed_option_work(self) -> None:
         universe = sample_universe()
         prices = {
+            "SHFE.au2608": 610.0,
             "SHFE.au2608C600": 11.0,
             "SHFE.au2608C620": 10.0,
             "SHFE.au2608P600": 3.0,
@@ -105,7 +106,8 @@ class IncrementalStrategyTests(unittest.TestCase):
 
         self.assertEqual(len(option_evaluations), 1)
         self.assertEqual(option_evaluations[0].symbols, ("SHFE.AU2608C600", "SHFE.AU2608C620"))
-        self.assertEqual(underlying_evaluations, [])
+        self.assertEqual(len(underlying_evaluations), 2)
+        self.assertTrue(all(item.metrics for item in underlying_evaluations))
 
     def test_incremental_work_scales_with_changed_symbol_not_total_conditions(self) -> None:
         for strikes in (100, 200, 400):

@@ -48,6 +48,13 @@ from optionsentry.gui.credentials import CredentialResolution, load_and_validate
 from optionsentry.gui.runner_adapter import GuiRunSignals, build_gui_runner
 from optionsentry.models import AlertEvent, ConditionEvaluation, Universe
 from optionsentry.runner import RunnerCycle
+from optionsentry.strategies import (
+    CALL_MONEYNESS_METRIC,
+    PUT_MONEYNESS_METRIC,
+    SPREAD_A_MONEYNESS_METRIC,
+    SPREAD_AVG_MONEYNESS_METRIC,
+    SPREAD_B_MONEYNESS_METRIC,
+)
 
 
 APP_NAME = "OptionSentry"
@@ -72,6 +79,13 @@ TOAST_FADE_MS = 150
 ALERT_SOUND_BEEP_INTERVAL_MS = 700
 CP_NEGATIVE_VALUE_COLOR = "#d8ecdf"
 CP_POSITIVE_VALUE_COLOR = "#f1d7d2"
+MONEYNESS_COLUMNS = (
+    CALL_MONEYNESS_METRIC,
+    PUT_MONEYNESS_METRIC,
+    SPREAD_A_MONEYNESS_METRIC,
+    SPREAD_B_MONEYNESS_METRIC,
+    SPREAD_AVG_MONEYNESS_METRIC,
+)
 
 
 def app_icon() -> QIcon:
@@ -525,7 +539,7 @@ class MainWindow(QMainWindow):
             grid.addWidget(value, row, column + 1)
         layout.addWidget(status_box)
 
-        self.active_view = StrategyEvaluationTable("当前活跃预警记录")
+        self.active_view = StrategyEvaluationTable("当前活跃预警记录", show_moneyness_columns=True)
         self.manual_active_refresh_button = QPushButton("手动刷新")
         self.manual_active_refresh_button.clicked.connect(self._request_active_manual_refresh)
         self.auto_active_refresh = QCheckBox("自动刷新")
@@ -912,14 +926,15 @@ class SortableTableWidgetItem(QTableWidgetItem):
 
 
 class StrategyEvaluationTable(QGroupBox):
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, show_moneyness_columns: bool = False) -> None:
         super().__init__(title)
+        self._show_moneyness_columns = show_moneyness_columns
         self._configured_strategy_names: tuple[str, ...] = ()
         self._strategy_names: tuple[str, ...] = ()
         self._selected_strategy: str | None = None
         self._records: list[_EvaluationRecord] = []
         self._buttons: dict[str | None, QPushButton] = {}
-        self._include_strategy_column: bool | None = None
+        self._table_shape: tuple[bool, bool] | None = None
 
         layout = QVBoxLayout(self)
         filter_row = QHBoxLayout()
@@ -1029,15 +1044,24 @@ class StrategyEvaluationTable(QGroupBox):
             horizontal_scroll.setValue(min(previous_horizontal, horizontal_scroll.maximum()))
 
     def _ensure_table_shape(self, include_strategy: bool) -> None:
-        if self._include_strategy_column == include_strategy:
+        table_shape = (include_strategy, self._show_moneyness_columns)
+        if self._table_shape == table_shape:
             return
-        self._include_strategy_column = include_strategy
+        self._table_shape = table_shape
         if include_strategy:
             headers = ("时间", "策略名", "值", "预警范围", "合约")
             widths = (165, 130, 100, 150, 360)
         else:
             headers = ("时间", "值", "预警范围", "合约")
             widths = (165, 100, 150, 360)
+        if self._show_moneyness_columns:
+            metric_widths = (105, 105, 105, 105, 115)
+            if include_strategy:
+                headers = (*headers[:3], *MONEYNESS_COLUMNS, *headers[3:])
+                widths = (*widths[:3], *metric_widths, *widths[3:])
+            else:
+                headers = (*headers[:2], *MONEYNESS_COLUMNS, *headers[2:])
+                widths = (*widths[:2], *metric_widths, *widths[2:])
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         _configure_resizable_columns(self.table, widths, stretch_last=True)
@@ -1051,23 +1075,50 @@ class StrategyEvaluationTable(QGroupBox):
         values: list[tuple[str, object | None]] = [
             (formatted_timestamp, formatted_timestamp),
             (f"{evaluation.value:.8f}", evaluation.value),
-            (
-                _format_warning_range(evaluation.min_value, evaluation.max_value),
-                (evaluation.min_value, evaluation.max_value),
-            ),
-            (", ".join(evaluation.symbols), None),
         ]
-        numeric_columns = (1, 2)
         if include_strategy:
             values.insert(1, (evaluation.strategy_name, evaluation.strategy_name.casefold()))
-            numeric_columns = (2, 3)
+        if self._show_moneyness_columns:
+            values.extend(_moneyness_cells(evaluation))
+        values.extend(
+            [
+                (
+                    _format_warning_range(evaluation.min_value, evaluation.max_value),
+                    (evaluation.min_value, evaluation.max_value),
+                ),
+                (", ".join(evaluation.symbols), None),
+            ]
+        )
         for column, (value, sort_key) in enumerate(values):
             item = _table_item(value, sort_key=sort_key)
             if background is not None:
                 item.setBackground(background)
-            if column in numeric_columns:
+            if _right_align_sort_key(sort_key):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, column, item)
+
+
+def _moneyness_cells(evaluation: ConditionEvaluation) -> list[tuple[str, object | None]]:
+    return [_moneyness_cell(evaluation, metric_name) for metric_name in MONEYNESS_COLUMNS]
+
+
+def _moneyness_cell(evaluation: ConditionEvaluation, metric_name: str) -> tuple[str, object | None]:
+    value = evaluation.metrics.get(metric_name)
+    if value is None:
+        return "-", None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return "-", None
+    if not math.isfinite(numeric):
+        return "-", None
+    return f"{numeric:.8f}", numeric
+
+
+def _right_align_sort_key(sort_key: object | None) -> bool:
+    if isinstance(sort_key, bool) or sort_key is None:
+        return False
+    return isinstance(sort_key, (int, float, tuple))
 
 
 class ConfigEditor(QWidget):

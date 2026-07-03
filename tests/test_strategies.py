@@ -4,7 +4,15 @@ import math
 import unittest
 
 from optionsentry.config import StrategyConfig, parse_config, strategy_display_name
-from optionsentry.strategies import AbsSpreadStrategy, CPComboStrategy
+from optionsentry.strategies import (
+    CALL_MONEYNESS_METRIC,
+    PUT_MONEYNESS_METRIC,
+    SPREAD_A_MONEYNESS_METRIC,
+    SPREAD_AVG_MONEYNESS_METRIC,
+    SPREAD_B_MONEYNESS_METRIC,
+    AbsSpreadStrategy,
+    CPComboStrategy,
+)
 from optionsentry.strategies import build_strategy
 from tests.helpers import sample_universe, snapshot
 
@@ -41,6 +49,8 @@ class StrategyTests(unittest.TestCase):
         active = [item for item in evaluations if item.active]
         self.assertEqual(len(active), 1)
         self.assertAlmostEqual(active[0].value, (12.0 - 1.0 + 600.0 - 590.0) / 590.0)
+        self.assertAlmostEqual(active[0].metrics[CALL_MONEYNESS_METRIC], (590.0 - 600.0) / 590.0)
+        self.assertAlmostEqual(active[0].metrics[PUT_MONEYNESS_METRIC], (600.0 - 590.0) / 590.0)
 
     def test_cp_combo_preserves_value_sign_for_negative_deviation(self) -> None:
         universe = sample_universe()
@@ -90,11 +100,12 @@ class StrategyTests(unittest.TestCase):
 
         self.assertEqual(evaluations, [])
 
-    def test_abs_spread_uses_absolute_strike_distance(self) -> None:
+    def test_abs_spread_uses_ab_leg_order_and_signed_strike_distance(self) -> None:
         universe = sample_universe()
         snap = snapshot(
             universe,
             {
+                "SHFE.au2608": 610.0,
                 "SHFE.au2608C600": 11.0,
                 "SHFE.au2608C620": 10.0,
                 "SHFE.au2608P600": 3.0,
@@ -106,7 +117,18 @@ class StrategyTests(unittest.TestCase):
 
         self.assertEqual(len(evaluations), 2)
         self.assertTrue(all(item.active for item in evaluations))
-        self.assertTrue(all(abs(item.value - 0.05) < 1e-9 for item in evaluations))
+        call_eval = next(item for item in evaluations if ":CALL:" in item.key)
+        put_eval = next(item for item in evaluations if ":PUT:" in item.key)
+        self.assertEqual(call_eval.symbols, ("SHFE.AU2608C600", "SHFE.AU2608C620"))
+        self.assertEqual(put_eval.symbols, ("SHFE.AU2608P620", "SHFE.AU2608P600"))
+        self.assertAlmostEqual(call_eval.value, (11.0 - 10.0) / (600.0 - 620.0))
+        self.assertAlmostEqual(put_eval.value, (2.0 - 3.0) / (620.0 - 600.0))
+        self.assertAlmostEqual(call_eval.metrics[SPREAD_A_MONEYNESS_METRIC], (610.0 - 600.0) / 610.0)
+        self.assertAlmostEqual(call_eval.metrics[SPREAD_B_MONEYNESS_METRIC], (610.0 - 620.0) / 610.0)
+        self.assertAlmostEqual(call_eval.metrics[SPREAD_AVG_MONEYNESS_METRIC], 0.0)
+        self.assertAlmostEqual(put_eval.metrics[SPREAD_A_MONEYNESS_METRIC], (620.0 - 610.0) / 610.0)
+        self.assertAlmostEqual(put_eval.metrics[SPREAD_B_MONEYNESS_METRIC], (600.0 - 610.0) / 610.0)
+        self.assertAlmostEqual(put_eval.metrics[SPREAD_AVG_MONEYNESS_METRIC], 0.0)
 
     def test_warning_range_uses_strict_bounds(self) -> None:
         universe = sample_universe()
@@ -121,10 +143,11 @@ class StrategyTests(unittest.TestCase):
         spread_snap = snapshot(
             universe,
             {
-                "SHFE.au2608C600": 12.0,
-                "SHFE.au2608C620": 10.0,
-                "SHFE.au2608P600": 4.0,
-                "SHFE.au2608P620": 2.0,
+                "SHFE.au2608": 610.0,
+                "SHFE.au2608C600": 10.0,
+                "SHFE.au2608C620": 12.0,
+                "SHFE.au2608P600": 2.0,
+                "SHFE.au2608P620": 4.0,
             },
         )
 

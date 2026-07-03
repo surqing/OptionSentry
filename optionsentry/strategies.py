@@ -10,6 +10,13 @@ from optionsentry.models import ConditionEvaluation, InstrumentMeta, MarketSnaps
 from optionsentry.symbols import normalize_symbols
 
 
+CALL_MONEYNESS_METRIC = "C虚实度"
+PUT_MONEYNESS_METRIC = "P虚实度"
+SPREAD_A_MONEYNESS_METRIC = "虚实度A"
+SPREAD_B_MONEYNESS_METRIC = "虚实度B"
+SPREAD_AVG_MONEYNESS_METRIC = "平均虚实度"
+
+
 class CompiledStrategy:
     name: str
 
@@ -126,6 +133,10 @@ class _CompiledCPComboStrategy(CompiledStrategy):
             value = deviation / future_price
             active = _in_alert_range(value, self.min_value, self.max_value)
             symbols = (condition.call_symbol, condition.put_symbol, condition.underlying_symbol)
+            metrics = {
+                CALL_MONEYNESS_METRIC: (future_price - condition.strike) / future_price,
+                PUT_MONEYNESS_METRIC: (condition.strike - future_price) / future_price,
+            }
             evaluations.append(
                 ConditionEvaluation(
                     key=condition.key,
@@ -140,6 +151,7 @@ class _CompiledCPComboStrategy(CompiledStrategy):
                         f"value={value:.8f} range={_format_range(self.min_value, self.max_value)} "
                         f"symbols={','.join(symbols)}"
                     ),
+                    metrics=metrics,
                 )
             )
         return evaluations
@@ -154,6 +166,7 @@ class _AbsSpreadCondition:
     second_symbol: str
     first_strike: float
     second_strike: float
+    underlying_symbol: str
 
 
 @dataclass
@@ -180,13 +193,32 @@ class _CompiledAbsSpreadStrategy(CompiledStrategy):
             self.condition_count,
         ):
             condition = self.conditions[condition_id]
-            first_price = snapshot.prices.get(condition.first_symbol)
-            second_price = snapshot.prices.get(condition.second_symbol)
+            future_price = snapshot.prices.get(condition.underlying_symbol)
+            if not _valid_price(future_price) or future_price <= 0:
+                continue
+            (
+                first_symbol,
+                first_strike,
+                second_symbol,
+                second_strike,
+            ) = _spread_leg_order(condition)
+            first_price = snapshot.prices.get(first_symbol)
+            second_price = snapshot.prices.get(second_symbol)
             if not (_valid_price(first_price) and _valid_price(second_price)):
                 continue
-            value = abs(first_price - second_price) / abs(condition.first_strike - condition.second_strike)
+            strike_distance = first_strike - second_strike
+            if strike_distance == 0:
+                continue
+            value = (first_price - second_price) / strike_distance
             active = _in_alert_range(value, self.min_value, self.max_value)
-            symbols = (condition.first_symbol, condition.second_symbol)
+            symbols = (first_symbol, second_symbol)
+            first_moneyness = _option_moneyness(condition.option_class, first_strike, future_price)
+            second_moneyness = _option_moneyness(condition.option_class, second_strike, future_price)
+            metrics = {
+                SPREAD_A_MONEYNESS_METRIC: first_moneyness,
+                SPREAD_B_MONEYNESS_METRIC: second_moneyness,
+                SPREAD_AVG_MONEYNESS_METRIC: (first_moneyness + second_moneyness) / 2,
+            }
             evaluations.append(
                 ConditionEvaluation(
                     key=condition.key,
@@ -198,10 +230,11 @@ class _CompiledAbsSpreadStrategy(CompiledStrategy):
                     symbols=symbols,
                     message=(
                         f"{self.name} {condition.group_text} {condition.option_class} "
-                        f"{_format_float(condition.first_strike)}-{_format_float(condition.second_strike)} "
+                        f"{_format_float(first_strike)}-{_format_float(second_strike)} "
                         f"value={value:.8f} range={_format_range(self.min_value, self.max_value)} "
                         f"symbols={','.join(symbols)}"
                     ),
+                    metrics=metrics,
                 )
             )
         return evaluations
@@ -279,8 +312,14 @@ def _compile_abs_spread(strategy: AbsSpreadStrategy, universe: Universe) -> _Com
                     second_symbol=second.symbol,
                     first_strike=first_strike,
                     second_strike=second_strike,
+                    underlying_symbol=group_key.underlying_symbol,
                 )
-                _add_condition(conditions, condition_ids_by_symbol, condition, (first.symbol, second.symbol))
+                _add_condition(
+                    conditions,
+                    condition_ids_by_symbol,
+                    condition,
+                    (first.symbol, second.symbol, group_key.underlying_symbol),
+                )
     return _CompiledAbsSpreadStrategy(
         name=strategy.name,
         min_value=strategy.min_value,
@@ -321,6 +360,20 @@ def _options_by_strike(options: list[InstrumentMeta], option_class: str) -> dict
         if option.option_class == option_class and option.strike_price is not None:
             result[option.strike_price] = option
     return result
+
+
+def _spread_leg_order(condition: _AbsSpreadCondition) -> tuple[str, float, str, float]:
+    first = (condition.first_symbol, condition.first_strike)
+    second = (condition.second_symbol, condition.second_strike)
+    if condition.option_class == "PUT":
+        return (*second, *first) if second[1] > first[1] else (*first, *second)
+    return (*first, *second) if first[1] < second[1] else (*second, *first)
+
+
+def _option_moneyness(option_class: str, strike: float, future_price: float) -> float:
+    if option_class == "PUT":
+        return (strike - future_price) / future_price
+    return (future_price - strike) / future_price
 
 
 def _valid_price(value: float | None) -> bool:
