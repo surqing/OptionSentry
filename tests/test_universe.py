@@ -105,6 +105,57 @@ class UniverseTests(unittest.TestCase):
         self.assertEqual(meta.expire_date, date(2026, 8, 25))
         self.assertEqual(meta.last_exercise_date, date(2026, 8, 25))
 
+    def test_tqsdk_row_to_meta_reads_static_contract_fields(self) -> None:
+        meta = _row_to_meta(
+            {
+                "instrument_id": "au2608C600",
+                "exchange_id": "SHFE",
+                "ins_class": "OPTION",
+                "price_tick": 0.5,
+                "volume_multiple": 15,
+                "open_limit": 0,
+                "max_limit_order_volume": 100,
+                "max_market_order_volume": 0,
+                "min_limit_order_volume": 1,
+                "min_market_order_volume": 0,
+                "open_max_market_order_volume": 0,
+                "open_max_limit_order_volume": 100,
+                "open_min_market_order_volume": 0,
+                "open_min_limit_order_volume": 1,
+                "expired": False,
+                "upper_limit": 20,
+                "lower_limit": 1,
+                "pre_settlement": 10,
+                "pre_open_interest": 123,
+                "pre_close": 9,
+                "trading_time_day": [["09:00:00", "10:15:00"], ["13:30:00", "15:00:00"]],
+                "trading_time_night": [["21:00:00", "26:30:00"]],
+            },
+            "SHFE.au2608C600",
+        )
+
+        self.assertEqual(meta.instrument_id, "au2608C600")
+        self.assertEqual(meta.exchange_id, "SHFE")
+        self.assertEqual(meta.price_tick, 0.5)
+        self.assertEqual(meta.volume_multiple, 15.0)
+        self.assertEqual(meta.open_limit, 0.0)
+        self.assertEqual(meta.max_limit_order_volume, 100.0)
+        self.assertEqual(meta.max_market_order_volume, 0.0)
+        self.assertEqual(meta.min_limit_order_volume, 1.0)
+        self.assertEqual(meta.min_market_order_volume, 0.0)
+        self.assertEqual(meta.open_max_market_order_volume, 0.0)
+        self.assertEqual(meta.open_max_limit_order_volume, 100.0)
+        self.assertEqual(meta.open_min_market_order_volume, 0.0)
+        self.assertEqual(meta.open_min_limit_order_volume, 1.0)
+        self.assertFalse(meta.expired)
+        self.assertEqual(meta.upper_limit, 20.0)
+        self.assertEqual(meta.lower_limit, 1.0)
+        self.assertEqual(meta.pre_settlement, 10.0)
+        self.assertEqual(meta.pre_open_interest, 123.0)
+        self.assertEqual(meta.pre_close, 9.0)
+        self.assertEqual(meta.trading_time_day, (("09:00:00", "10:15:00"), ("13:30:00", "15:00:00")))
+        self.assertEqual(meta.trading_time_night, (("21:00:00", "26:30:00"),))
+
     def test_tqsdk_query_metas_uses_batches(self) -> None:
         api = _FakeSymbolInfoApi()
         source = TqSdkDataSource(

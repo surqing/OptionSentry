@@ -48,26 +48,39 @@ def accept(option, ctx) -> bool:
 
 ## option 对象字段
 
-`option` 是 `InstrumentMeta` 对象。当前可用字段如下。
+`option` 是 `InstrumentMeta` 对象。下列字段已通过 TqSdk `query_symbol_info` 验证，并已接入 `option` 参数，用户可以在 `accept(option, ctx)` 中直接访问。
+
+### 合约身份字段
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
 | `symbol` | `str` | 系统内部标准化合约代码，通常为大写，例如 `SHFE.AU2608C600`。 |
 | `api_symbol` | `str` | 传给 TqSdk 或从 TqSdk 得到的原始风格合约代码，可能保留品种大小写。 |
+| `instrument_id` | `str` | TqSdk 返回的合约 ID。 |
+| `instrument_name` | `str` | 合约名称，可能为空字符串。 |
+| `exchange_id` | `str` | 交易所代码，例如 `SHFE`。 |
+| `product_id` | `str` | 品种代码，可能为空字符串。 |
 | `ins_class` | `str` | 合约类型。传入 `accept` 的对象通常为 `OPTION`。 |
 | `is_option` | `bool` | 是否为期权。当前 `accept` 默认只接收期权，因此一般为 `True`。 |
 | `is_future` | `bool` | 是否为期货。传入 `accept` 的 `option` 一般为 `False`。 |
+| `expired` | `bool | None` | TqSdk 返回的是否已到期标记。 |
+
+### 期权属性字段
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
 | `underlying_symbol` | `str` | 标的期货的系统内部代码，例如 `SHFE.AU2608`。 |
 | `api_underlying_symbol` | `str` | 标的期货的 TqSdk 原始风格代码。 |
 | `strike_price` | `float | None` | 行权价。缺失时为 `None`。 |
 | `option_class` | `str` | 期权方向，通常为 `CALL` 或 `PUT`。 |
-| `exercise_year` | `int | None` | 到期年份，例如 `2026`。缺失时为 `None`。 |
-| `exercise_month` | `int | None` | 到期月份，例如 `8`。缺失时为 `None`。 |
-| `expiry_key` | `str` | 到期年月文本，例如 `2026-8`；缺失字段会显示为 `NA`。 |
-| `instrument_name` | `str` | 合约名称，可能为空字符串。 |
-| `product_id` | `str` | 品种代码，可能为空字符串。 |
-| `volume` | `float | None` | 成交量基础信息，可能为 `None`。 |
-| `open_interest` | `float | None` | 持仓量基础信息，可能为 `None`。 |
+
+### 到期、行权、交割字段
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `exercise_year` | `int | None` | 行权年份，例如 `2026`。缺失时为 `None`。 |
+| `exercise_month` | `int | None` | 行权月份，例如 `8`。缺失时为 `None`。 |
+| `expiry_key` | `str` | 行权年月文本，例如 `2026-8`；缺失字段会显示为 `NA`。 |
 | `expire_datetime` | `float | None` | TqSdk 返回的到期时间戳，通常是 Unix 秒级时间戳。 |
 | `expire_date` | `datetime.date | None` | 由 `expire_datetime` 转出的到期日期，便于在脚本里按日期筛选。 |
 | `expire_rest_days` | `int | None` | 距到期剩余天数，可能为 `None`。 |
@@ -75,6 +88,52 @@ def accept(option, ctx) -> bool:
 | `last_exercise_date` | `datetime.date | None` | 由 `last_exercise_datetime` 转出的最后行权日期。 |
 | `delivery_year` | `int | None` | 标的交割年份，例如 `2026`。 |
 | `delivery_month` | `int | None` | 标的交割月份，例如 `9`。 |
+
+### 合约规格和下单限制字段
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `price_tick` | `float | None` | 最小变动价位。 |
+| `volume_multiple` | `float | None` | 合约乘数。 |
+| `open_limit` | `float | None` | TqSdk 返回的开仓限制字段。 |
+| `max_limit_order_volume` | `float | None` | 限价单最大下单手数。 |
+| `max_market_order_volume` | `float | None` | 市价单最大下单手数。 |
+| `min_limit_order_volume` | `float | None` | 限价单最小下单手数。 |
+| `min_market_order_volume` | `float | None` | 市价单最小下单手数。 |
+| `open_max_limit_order_volume` | `float | None` | 开仓限价单最大手数。 |
+| `open_max_market_order_volume` | `float | None` | 开仓市价单最大手数。 |
+| `open_min_limit_order_volume` | `float | None` | 开仓限价单最小手数。 |
+| `open_min_market_order_volume` | `float | None` | 开仓市价单最小手数。 |
+
+### 交易统计和参考价格字段
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `volume` | `float | None` | 成交量基础信息，可能为 `None`。 |
+| `open_interest` | `float | None` | 持仓量基础信息，可能为 `None`。 |
+| `upper_limit` | `float | None` | 涨停价。 |
+| `lower_limit` | `float | None` | 跌停价。 |
+| `pre_settlement` | `float | None` | 昨结算价。 |
+| `pre_open_interest` | `float | None` | 昨持仓量。 |
+| `pre_close` | `float | None` | 昨收盘价。 |
+
+### 交易时段字段
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `trading_time_day` | `tuple[tuple[str, str], ...]` | 日盘交易时段，例如 `(("09:00:00", "10:15:00"), ...)`。 |
+| `trading_time_night` | `tuple[tuple[str, str], ...]` | 夜盘交易时段，例如 `(("21:00:00", "26:30:00"),)`。 |
+
+当前字段覆盖范围以 TqSdk `query_symbol_info` 返回的静态合约信息为准。已经验证过 TqSdk `get_quote` 可以拿到 `last_price`、`ask_price1`、`bid_price1`、`ask_volume1`、`bid_volume1`、`highest`、`lowest`、`open`、`close`、`average`、`amount` 等实时行情快照字段，但这些字段目前没有接入 `option` 参数。原因是 `accept` 在策略编译前执行，用来决定合约范围；如果在这里整合实时盘口和价格，就需要启动阶段额外订阅全量候选合约，可能明显增加启动耗时和超时风险。
+
+因此，当前不要在 `accept` 中写：
+
+```python
+def accept(option, ctx) -> bool:
+    return option.last_price > 10  # 当前不支持
+```
+
+如果后续需要“按实时价格、盘口、价差先筛一遍合约”，建议增加一个独立的 quote snapshot enrichment 开关和对应字段，而不是默认混入静态合约筛选。
 
 `volume` 和 `open_interest` 是启动阶段能拿到的基础信息，不能当作实时行情字段使用。不同交易所、不同 TqSdk 返回路径下这两个字段可能为空。写脚本时一定要处理 `None`：
 
@@ -110,7 +169,7 @@ def accept(option, ctx) -> bool:
 
 ## 常用示例
 
-### 按到期年月筛选
+### 按行权年月筛选
 
 ```python
 MIN_EXERCISE_YYYYMM = 202608

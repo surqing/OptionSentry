@@ -11,6 +11,8 @@ from optionsentry.symbols import normalize_symbol, normalize_symbols
 class InstrumentMeta:
     symbol: str
     ins_class: str
+    instrument_id: str = ""
+    exchange_id: str = ""
     underlying_symbol: str = ""
     strike_price: float | None = None
     option_class: str = ""
@@ -18,13 +20,32 @@ class InstrumentMeta:
     exercise_month: int | None = None
     instrument_name: str = ""
     product_id: str = ""
+    price_tick: float | None = None
+    volume_multiple: float | None = None
+    open_limit: float | None = None
+    max_limit_order_volume: float | None = None
+    max_market_order_volume: float | None = None
+    min_limit_order_volume: float | None = None
+    min_market_order_volume: float | None = None
+    open_max_market_order_volume: float | None = None
+    open_max_limit_order_volume: float | None = None
+    open_min_market_order_volume: float | None = None
+    open_min_limit_order_volume: float | None = None
     volume: float | None = None
     open_interest: float | None = None
+    expired: bool | None = None
     expire_datetime: float | None = None
     expire_rest_days: int | None = None
     delivery_year: int | None = None
     delivery_month: int | None = None
     last_exercise_datetime: float | None = None
+    upper_limit: float | None = None
+    lower_limit: float | None = None
+    pre_settlement: float | None = None
+    pre_open_interest: float | None = None
+    pre_close: float | None = None
+    trading_time_day: tuple[tuple[str, str], ...] = ()
+    trading_time_night: tuple[tuple[str, str], ...] = ()
     api_symbol: str = ""
     api_underlying_symbol: str = ""
 

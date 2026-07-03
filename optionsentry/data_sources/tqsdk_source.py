@@ -682,6 +682,8 @@ def _row_to_meta(row: Any, fallback_symbol: str) -> InstrumentMeta:
     return InstrumentMeta(
         symbol=normalize_symbol(api_symbol),
         ins_class=_clean_str(_row_get(row, "ins_class")),
+        instrument_id=_clean_str(_row_get(row, "instrument_id")),
+        exchange_id=exchange_id,
         underlying_symbol=normalize_symbol(api_underlying_symbol) if api_underlying_symbol else "",
         strike_price=_optional_float(_row_get(row, "strike_price")),
         option_class=_clean_str(_row_get(row, "option_class")),
@@ -689,13 +691,32 @@ def _row_to_meta(row: Any, fallback_symbol: str) -> InstrumentMeta:
         exercise_month=_optional_int(_row_get(row, "exercise_month")),
         instrument_name=_clean_str(_row_get(row, "instrument_name")),
         product_id=_clean_str(_row_get(row, "product_id")),
+        price_tick=_optional_float(_row_get(row, "price_tick")),
+        volume_multiple=_optional_float(_row_get(row, "volume_multiple")),
+        open_limit=_optional_float(_row_get(row, "open_limit")),
+        max_limit_order_volume=_optional_float(_row_get(row, "max_limit_order_volume")),
+        max_market_order_volume=_optional_float(_row_get(row, "max_market_order_volume")),
+        min_limit_order_volume=_optional_float(_row_get(row, "min_limit_order_volume")),
+        min_market_order_volume=_optional_float(_row_get(row, "min_market_order_volume")),
+        open_max_market_order_volume=_optional_float(_row_get(row, "open_max_market_order_volume")),
+        open_max_limit_order_volume=_optional_float(_row_get(row, "open_max_limit_order_volume")),
+        open_min_market_order_volume=_optional_float(_row_get(row, "open_min_market_order_volume")),
+        open_min_limit_order_volume=_optional_float(_row_get(row, "open_min_limit_order_volume")),
         volume=_optional_float(_row_get(row, "volume")),
         open_interest=_optional_float(_row_get(row, "open_interest")),
+        expired=_optional_bool(_row_get(row, "expired")),
         expire_datetime=_optional_float(_row_get(row, "expire_datetime")),
         expire_rest_days=_optional_int(_row_get(row, "expire_rest_days")),
         delivery_year=_optional_int(_row_get(row, "delivery_year")),
         delivery_month=_optional_int(_row_get(row, "delivery_month")),
         last_exercise_datetime=_optional_float(_row_get(row, "last_exercise_datetime")),
+        upper_limit=_optional_float(_row_get(row, "upper_limit")),
+        lower_limit=_optional_float(_row_get(row, "lower_limit")),
+        pre_settlement=_optional_float(_row_get(row, "pre_settlement")),
+        pre_open_interest=_optional_float(_row_get(row, "pre_open_interest")),
+        pre_close=_optional_float(_row_get(row, "pre_close")),
+        trading_time_day=_trading_sessions(_row_get(row, "trading_time_day")),
+        trading_time_night=_trading_sessions(_row_get(row, "trading_time_night")),
         api_symbol=api_symbol,
         api_underlying_symbol=api_underlying_symbol,
     )
@@ -733,6 +754,40 @@ def _optional_int(value: Any) -> int | None:
         if math.isfinite(numeric):
             return int(numeric)
     return None
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            return True
+        if normalized in {"false", "0", "no"}:
+            return False
+        return None
+    with suppress(TypeError, ValueError):
+        return bool(value)
+    return None
+
+
+def _trading_sessions(value: Any) -> tuple[tuple[str, str], ...]:
+    if value is None:
+        return ()
+    sessions: list[tuple[str, str]] = []
+    try:
+        iterator = iter(value)
+    except TypeError:
+        return ()
+    for item in iterator:
+        with suppress(TypeError, IndexError):
+            start = str(item[0])
+            end = str(item[1])
+            if start and end:
+                sessions.append((start, end))
+    return tuple(sessions)
 
 
 def _valid_number(value: Any) -> bool:
