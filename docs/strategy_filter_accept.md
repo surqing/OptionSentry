@@ -66,6 +66,13 @@ def accept(option, ctx) -> bool:
 | `product_id` | `str` | 品种代码，可能为空字符串。 |
 | `volume` | `float | None` | 成交量基础信息，可能为 `None`。 |
 | `open_interest` | `float | None` | 持仓量基础信息，可能为 `None`。 |
+| `expire_datetime` | `float | None` | TqSdk 返回的到期时间戳，通常是 Unix 秒级时间戳。 |
+| `expire_date` | `datetime.date | None` | 由 `expire_datetime` 转出的到期日期，便于在脚本里按日期筛选。 |
+| `expire_rest_days` | `int | None` | 距到期剩余天数，可能为 `None`。 |
+| `last_exercise_datetime` | `float | None` | TqSdk 返回的最后行权时间戳，通常是 Unix 秒级时间戳。 |
+| `last_exercise_date` | `datetime.date | None` | 由 `last_exercise_datetime` 转出的最后行权日期。 |
+| `delivery_year` | `int | None` | 标的交割年份，例如 `2026`。 |
+| `delivery_month` | `int | None` | 标的交割月份，例如 `9`。 |
 
 `volume` 和 `open_interest` 是启动阶段能拿到的基础信息，不能当作实时行情字段使用。不同交易所、不同 TqSdk 返回路径下这两个字段可能为空。写脚本时一定要处理 `None`：
 
@@ -113,6 +120,32 @@ def accept(option, ctx) -> bool:
         return False
     exercise_yyyymm = option.exercise_year * 100 + option.exercise_month
     return MIN_EXERCISE_YYYYMM <= exercise_yyyymm <= MAX_EXERCISE_YYYYMM
+```
+
+`exercise_year/month` 表示期权行权年月。对于期权来说，它可能早于标的期货的交割年月。例如某些 `au2609` 期权的 `exercise_year/month` 可能是 `2026/8`，而 `delivery_year/month` 是 `2026/9`。
+
+### 按具体到期日筛选
+
+```python
+from datetime import date
+
+
+MIN_EXPIRE_DATE = date(2026, 8, 1)
+MAX_EXPIRE_DATE = date(2026, 8, 31)
+
+
+def accept(option, ctx) -> bool:
+    return (
+        option.expire_date is not None
+        and MIN_EXPIRE_DATE <= option.expire_date <= MAX_EXPIRE_DATE
+    )
+```
+
+### 按剩余到期天数筛选
+
+```python
+def accept(option, ctx) -> bool:
+    return option.expire_rest_days is not None and 10 <= option.expire_rest_days <= 60
 ```
 
 ### 只保留某个标的品种
@@ -225,11 +258,10 @@ Strategy filter skipped: strategy=价差预警 script=<none> function=accept sco
 ## 编写注意事项
 
 - 始终返回 `True` 或 `False`。
-- 对可能缺失的字段先判断 `None`，尤其是 `strike_price`、`exercise_year`、`exercise_month`、`volume`、`open_interest`。
+- 对可能缺失的字段先判断 `None`，尤其是 `strike_price`、`exercise_year`、`exercise_month`、`expire_date`、`expire_rest_days`、`volume`、`open_interest`。
 - 不要在 `accept` 里请求网络、登录 TqSdk、订阅行情或做很慢的计算；它会对每个期权调用一次。
 - 不要依赖实时价格，`accept` 阶段没有行情快照。
 - 不要修改 `option` 或 `ctx`，它们应当只读使用。
 - 脚本是本机可信代码，系统不会做安全沙箱；不要运行来源不明的脚本。
 - 同一个脚本可以配置给多个策略，但每个策略会独立筛选和编译。
 - 如果要按“每个到期月成交量前 N 名”这类需要全局排序的规则筛选，当前 V1 的逐个 `accept` 接口不适合，需要后续扩展批量筛选接口。
-

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import unittest
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -78,6 +79,31 @@ class UniverseTests(unittest.TestCase):
 
         self.assertEqual(meta.volume, 12.0)
         self.assertEqual(meta.open_interest, 34.0)
+
+    def test_tqsdk_row_to_meta_reads_expiry_and_exercise_dates(self) -> None:
+        meta = _row_to_meta(
+            {
+                "instrument_id": "au2608C600",
+                "exchange_id": "SHFE",
+                "ins_class": "OPTION",
+                "expire_datetime": 1787641200,
+                "expire_rest_days": 53,
+                "delivery_year": 2026,
+                "delivery_month": 8,
+                "last_exercise_datetime": 1787641200,
+                "exercise_year": 2026,
+                "exercise_month": 7,
+            },
+            "SHFE.au2608C600",
+        )
+
+        self.assertEqual(meta.expire_datetime, 1787641200.0)
+        self.assertEqual(meta.expire_rest_days, 53)
+        self.assertEqual(meta.delivery_year, 2026)
+        self.assertEqual(meta.delivery_month, 8)
+        self.assertEqual(meta.last_exercise_datetime, 1787641200.0)
+        self.assertEqual(meta.expire_date, date(2026, 8, 25))
+        self.assertEqual(meta.last_exercise_date, date(2026, 8, 25))
 
     def test_tqsdk_query_metas_uses_batches(self) -> None:
         api = _FakeSymbolInfoApi()

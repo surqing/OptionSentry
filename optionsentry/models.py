@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from typing import Iterable
 
 from optionsentry.symbols import normalize_symbol, normalize_symbols
@@ -19,6 +20,11 @@ class InstrumentMeta:
     product_id: str = ""
     volume: float | None = None
     open_interest: float | None = None
+    expire_datetime: float | None = None
+    expire_rest_days: int | None = None
+    delivery_year: int | None = None
+    delivery_month: int | None = None
+    last_exercise_datetime: float | None = None
     api_symbol: str = ""
     api_underlying_symbol: str = ""
 
@@ -47,6 +53,23 @@ class InstrumentMeta:
         year = self.exercise_year if self.exercise_year is not None else "NA"
         month = self.exercise_month if self.exercise_month is not None else "NA"
         return f"{year}-{month}"
+
+    @property
+    def expire_date(self) -> date | None:
+        return _date_from_timestamp(self.expire_datetime)
+
+    @property
+    def last_exercise_date(self) -> date | None:
+        return _date_from_timestamp(self.last_exercise_datetime)
+
+
+def _date_from_timestamp(value: float | None) -> date | None:
+    if value is None:
+        return None
+    try:
+        return datetime.fromtimestamp(value).date()
+    except (OSError, OverflowError, ValueError):
+        return None
 
 
 @dataclass(frozen=True)

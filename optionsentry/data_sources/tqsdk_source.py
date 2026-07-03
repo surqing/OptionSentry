@@ -691,6 +691,11 @@ def _row_to_meta(row: Any, fallback_symbol: str) -> InstrumentMeta:
         product_id=_clean_str(_row_get(row, "product_id")),
         volume=_optional_float(_row_get(row, "volume")),
         open_interest=_optional_float(_row_get(row, "open_interest")),
+        expire_datetime=_optional_float(_row_get(row, "expire_datetime")),
+        expire_rest_days=_optional_int(_row_get(row, "expire_rest_days")),
+        delivery_year=_optional_int(_row_get(row, "delivery_year")),
+        delivery_month=_optional_int(_row_get(row, "delivery_month")),
+        last_exercise_datetime=_optional_float(_row_get(row, "last_exercise_datetime")),
         api_symbol=api_symbol,
         api_underlying_symbol=api_underlying_symbol,
     )
