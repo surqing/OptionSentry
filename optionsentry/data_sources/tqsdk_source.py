@@ -310,6 +310,12 @@ class TqSdkDataSource:
         try:
             quotes = self._subscribe_live_quotes(api, symbols, _api_symbols_by_internal_symbol(universe))
             self.logger.info("Subscribed live quotes: %s", len(quotes))
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(
+                    "Final live quote subscription symbols (%s): %s",
+                    len(quotes),
+                    sorted(quotes),
+                )
             prices: dict[str, float] = {}
             initialized = False
             while not self._should_stop():
@@ -408,6 +414,12 @@ class TqSdkDataSource:
             serials = self._create_backtest_serials(api, symbols, _api_symbols_by_internal_symbol(universe))
             symbols = [symbol for symbol in symbols if symbol in serials]
             self.logger.info("Subscribed backtest K-lines: %s", len(serials))
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(
+                    "Final backtest K-line subscription symbols (%s): %s",
+                    len(symbols),
+                    symbols,
+                )
             last_datetime: Any = None
             last_ready_count = -1
             last_wait_log = 0.0

@@ -179,6 +179,35 @@ class LivePriceCacheTests(unittest.TestCase):
         )
         self.assertEqual(first.prices["SHFE.AU2608"], 600.0)
 
+    def test_live_stream_debug_logs_final_subscription_symbols(self) -> None:
+        universe = _one_strike_universe()
+        api = _FakeApi(
+            events=(
+                _FakeEvent(
+                    updates={
+                        "SHFE.au2608": {"datetime": "t1", "last_price": 600.0},
+                        "SHFE.au2608C600": {"datetime": "t1", "last_price": 5.0},
+                        "SHFE.au2608P600": {"datetime": "t1", "last_price": 5.0},
+                    },
+                    changed_symbols=set(),
+                ),
+            )
+        )
+        data_source = _FakeLiveDataSource(api)
+
+        with self.assertLogs("tests.live_price_cache", level="DEBUG") as logs:
+            stream = data_source._stream_live(universe)
+            try:
+                next(stream)
+            finally:
+                stream.close()
+
+        text = "\n".join(logs.output)
+        self.assertIn("Final live quote subscription symbols (3)", text)
+        self.assertIn("SHFE.AU2608", text)
+        self.assertIn("SHFE.AU2608C600", text)
+        self.assertIn("SHFE.AU2608P600", text)
+
     def test_live_stream_yields_full_cached_prices_with_only_changed_symbols(self) -> None:
         universe = _one_strike_universe()
         api = _FakeApi(
