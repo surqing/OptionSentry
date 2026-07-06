@@ -110,17 +110,15 @@ class TqSdkDataSource:
             return self._discover_active_symbols(api, "OPTION", universe_config.exchange_ids)
 
         option_symbols = self._discover_active_symbols(api, "OPTION")
-        future_symbols = self._discover_active_symbols(api, "FUTURE")
-        metas = self._query_metas(api, sorted(set(option_symbols) | set(future_symbols)))
         if universe_config.mode == "指定模式":
-            included_symbols = set(_filter_option_symbols_by_terms(metas, universe_config.only_do, exclude=False))
-            excluded_symbols = set(_filter_option_symbols_by_terms(metas, universe_config.not_do, exclude=False))
+            included_symbols = set(_filter_symbols_by_terms(option_symbols, universe_config.only_do))
+            excluded_symbols = set(_filter_symbols_by_terms(option_symbols, universe_config.not_do))
             symbols = sorted(included_symbols - excluded_symbols)
             self.logger.info(
                 "Applied universe specified filter: only_do=%s not_do=%s options %s -> %s.",
                 universe_config.only_do,
                 universe_config.not_do,
-                len([meta for meta in metas.values() if meta.is_option]),
+                len(option_symbols),
                 len(symbols),
             )
             return symbols
@@ -895,48 +893,22 @@ def _looks_like_future_symbol(symbol: str) -> bool:
     return exchange in FUTURE_EXCHANGES
 
 
-def _filter_option_symbols_by_terms(
-    metas: dict[str, InstrumentMeta],
-    terms: tuple[str, ...],
-    *,
-    exclude: bool,
-) -> list[str]:
-    matched_symbols = {
+def _filter_symbols_by_terms(symbols: list[str], terms: tuple[str, ...]) -> list[str]:
+    normalized_terms = tuple(_match_text(term) for term in terms if _match_text(term))
+    if not normalized_terms:
+        return []
+    return sorted(
         symbol
-        for symbol, meta in metas.items()
-        if _instrument_matches_terms(meta, terms)
-    }
-    matched_underlyings = {
-        symbol
-        for symbol, meta in metas.items()
-        if symbol in matched_symbols and (meta.is_future or _looks_like_future_symbol(symbol))
-    }
-    selected = []
-    for symbol, meta in metas.items():
-        if not meta.is_option:
-            continue
-        matched = symbol in matched_symbols or (
-            bool(meta.underlying_symbol) and meta.underlying_symbol in matched_underlyings
-        )
-        if matched != exclude:
-            selected.append(symbol)
-    return sorted(selected)
-
-
-def _instrument_matches_terms(meta: InstrumentMeta, terms: tuple[str, ...]) -> bool:
-    haystacks = (
-        meta.symbol,
-        meta.api_symbol,
-        meta.underlying_symbol,
-        meta.api_underlying_symbol,
-        meta.product_id,
-        meta.instrument_name,
+        for symbol in symbols
+        if _symbol_matches_terms(symbol, normalized_terms)
     )
-    normalized_haystacks = tuple(_match_text(value) for value in haystacks if str(value).strip())
+
+
+def _symbol_matches_terms(symbol: str, normalized_terms: tuple[str, ...]) -> bool:
+    normalized_haystacks = (_match_text(symbol), _match_text(tqsdk_api_symbol(symbol)))
     return any(
-        term_text in haystack
-        for term in terms
-        if (term_text := _match_text(term))
+        term in haystack
+        for term in normalized_terms
         for haystack in normalized_haystacks
     )
 

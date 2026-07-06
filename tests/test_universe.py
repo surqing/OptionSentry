@@ -493,6 +493,18 @@ class UniverseTests(unittest.TestCase):
             },
         )
         self.assertEqual({future.symbol for future in universe.futures}, {"SHFE.AG2608", "SHFE.AU2608"})
+        queried_symbols = {symbol for call in api.symbol_info_calls for symbol in call}
+        self.assertEqual(
+            queried_symbols,
+            {
+                "SHFE.ag2608C5000",
+                "SHFE.ag2608P5000",
+                "SHFE.au2608C600",
+                "SHFE.au2608P600",
+                "SHFE.ag2608",
+                "SHFE.au2608",
+            },
+        )
 
     def test_not_do_removes_matching_futures_and_options_from_specified_mode(self) -> None:
         api = _FakeDiscoveryApi(_multi_product_rows())
@@ -583,6 +595,7 @@ class _FakeDiscoveryApi:
         self.events = list(events)
         self.quotes: dict[str, _FakeQuote] = {}
         self.quote_list_calls: tuple[tuple[str, ...], ...] = ()
+        self.symbol_info_calls: tuple[tuple[str, ...], ...] = ()
         self.closed = False
 
     def query_quotes(self, **kwargs: Any) -> list[str]:
@@ -596,6 +609,7 @@ class _FakeDiscoveryApi:
         ]
 
     def query_symbol_info(self, symbols: list[str]) -> "_FakeRowsFrame":
+        self.symbol_info_calls = (*self.symbol_info_calls, tuple(symbols))
         return _FakeRowsFrame(symbols, self.rows)
 
     def get_quote_list(self, symbols: list[str]) -> list["_FakeQuote"]:
