@@ -160,7 +160,27 @@ class TqSdkDataSource:
                     len(batches),
                     len(batch),
                 )
-            df = api.query_symbol_info(batch)
+            try:
+                df = api.query_symbol_info(batch)
+            except Exception:
+                self.logger.exception(
+                    "\n"
+                    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+                    "!!! 合约元数据查询失败，监控启动已中断\n"
+                    "!!! batch=%s/%s batch_size=%s symbols_in_batch=%s\n"
+                    "!!! first_symbols=%s\n"
+                    "!!! last_symbols=%s\n"
+                    "!!! 提示：请检查 only_do/not_do 是否足够收窄；"
+                    "如果必须扫描大量合约，可尝试调小 datasource.tqsdk.symbol_info_batch_size。\n"
+                    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+                    batch_index,
+                    len(batches),
+                    batch_size,
+                    len(batch),
+                    batch[:10],
+                    batch[-10:],
+                )
+                raise
             for position, (index, row) in enumerate(df.iterrows()):
                 fallback_symbol = batch[position] if position < len(batch) else str(index)
                 meta = _row_to_meta(row, fallback_symbol)

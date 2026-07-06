@@ -187,6 +187,31 @@ class UniverseTests(unittest.TestCase):
             ),
         )
 
+    def test_tqsdk_query_metas_logs_prominent_batch_failure(self) -> None:
+        logger_name = "tests.universe.batch_metas_failure"
+        source = TqSdkDataSource(
+            config=SimpleNamespace(tqsdk=SimpleNamespace(symbol_info_batch_size=2)),
+            logger=logging.getLogger(logger_name),
+        )
+
+        with self.assertLogs(logger_name, level="ERROR") as logs:
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                source._query_metas(
+                    _FailingSymbolInfoApi(fail_on_call=2),
+                    (
+                        "SHFE.AU2608",
+                        "SHFE.AU2609",
+                        "SHFE.AU2610",
+                    ),
+                )
+
+        text = "\n".join(logs.output)
+        self.assertIn("合约元数据查询失败", text)
+        self.assertIn("监控启动已中断", text)
+        self.assertIn("batch=2/2", text)
+        self.assertIn("SHFE.au2610", text)
+        self.assertIn("symbol_info_batch_size", text)
+
     def test_config_parses_universe_liquidity_filters(self) -> None:
         config = parse_config(
             {
@@ -532,6 +557,18 @@ class _FakeSymbolInfoApi:
 
     def query_symbol_info(self, symbols: list[str]) -> "_FakeSymbolInfoFrame":
         self.calls = (*self.calls, tuple(symbols))
+        return _FakeSymbolInfoFrame(symbols)
+
+
+class _FailingSymbolInfoApi:
+    def __init__(self, fail_on_call: int) -> None:
+        self.fail_on_call = fail_on_call
+        self.calls = 0
+
+    def query_symbol_info(self, symbols: list[str]) -> "_FakeSymbolInfoFrame":
+        self.calls += 1
+        if self.calls == self.fail_on_call:
+            raise RuntimeError("boom")
         return _FakeSymbolInfoFrame(symbols)
 
 
