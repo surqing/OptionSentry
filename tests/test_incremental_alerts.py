@@ -148,9 +148,9 @@ class LivePriceCacheTests(unittest.TestCase):
         data_source.config = SimpleNamespace(
             runtime=SimpleNamespace(mode="live"),
             universe=SimpleNamespace(
-                mode="onlyDo",
+                mode="指定模式",
                 only_do=("SHFE.au2608",),
-                exclude_do=(),
+                not_do=(),
                 exchange_ids=(),
             ),
             tqsdk=SimpleNamespace(

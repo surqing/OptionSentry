@@ -4,16 +4,18 @@ price_basis = "last"
 alert_on_first_match = false
 
 [universe]
-mode = "onlyDo"
+mode = "指定模式"
 only_do = ["AU"]
-exclude_do = []
+not_do = []
 # Live-mode liquidity filters. 0 disables the filter; 1 filters out zero values.
 min_volume = 0
 min_open_interest = 0
 # mode = "all"
 # exchange_ids = ["SHFE", "DCE", "CZCE", "INE", "GFEX", "CFFEX"]
-# mode = "excludeDo"
-# exclude_do = ["AG", "AU"]
+# 指定模式：only_do 先纳入匹配品种/合约，not_do 再从中排除匹配品种/合约。
+# mode = "指定模式"
+# only_do = ["AG"]
+# not_do = ["AG2607"]
 
 [datasource.tqsdk]
 # username = "your-tqsdk-username"

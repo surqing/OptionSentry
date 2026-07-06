@@ -250,9 +250,9 @@ class UniverseTests(unittest.TestCase):
             {
                 "runtime": {},
                 "universe": {
-                    "mode": "onlyDo",
+                    "mode": "指定模式",
                     "only_do": ["shfe.au2608", "ag"],
-                    "excludeDo": ["shfe.au2608c600"],
+                    "notDo": ["shfe.au2608c600"],
                     "exchange_ids": ["shfe"],
                 },
                 "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
@@ -260,23 +260,24 @@ class UniverseTests(unittest.TestCase):
         )
 
         self.assertEqual(config.universe.only_do, ("SHFE.AU2608", "AG"))
-        self.assertEqual(config.universe.exclude_do, ("SHFE.AU2608C600",))
+        self.assertEqual(config.universe.not_do, ("SHFE.AU2608C600",))
         self.assertEqual(config.universe.exchange_ids, ("SHFE",))
 
         with self.assertRaisesRegex(ConfigError, "universe.only_do"):
             parse_config(
                 {
-                    "universe": {"mode": "onlyDo"},
+                    "universe": {"mode": "指定模式"},
                     "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
-        with self.assertRaisesRegex(ConfigError, "universe.exclude_do"):
-            parse_config(
-                {
-                    "universe": {"mode": "excludeDo"},
-                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
-                }
-            )
+        for removed_mode in ("onlyDo", "excludeDo"):
+            with self.assertRaisesRegex(ConfigError, "universe.mode"):
+                parse_config(
+                    {
+                        "universe": {"mode": removed_mode, "only_do": ["AG"]},
+                        "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
+                    }
+                )
 
     def test_config_parses_active_alert_refresh_settings(self) -> None:
         config = parse_config(
@@ -470,13 +471,13 @@ class UniverseTests(unittest.TestCase):
         )
         self.assertTrue(all(api.closed for api in probe_apis))
 
-    def test_only_do_discovers_matching_futures_and_options(self) -> None:
+    def test_specified_mode_discovers_matching_futures_and_options(self) -> None:
         api = _FakeDiscoveryApi(_multi_product_rows())
         source = _FakeDiscoveryDataSource(
             api,
             min_volume=0,
             min_open_interest=0,
-            mode="onlyDo",
+            mode="指定模式",
             only_do=("Ag", "Au"),
         )
 
@@ -493,23 +494,24 @@ class UniverseTests(unittest.TestCase):
         )
         self.assertEqual({future.symbol for future in universe.futures}, {"SHFE.AG2608", "SHFE.AU2608"})
 
-    def test_exclude_do_removes_matching_futures_and_options(self) -> None:
+    def test_not_do_removes_matching_futures_and_options_from_specified_mode(self) -> None:
         api = _FakeDiscoveryApi(_multi_product_rows())
         source = _FakeDiscoveryDataSource(
             api,
             min_volume=0,
             min_open_interest=0,
-            mode="excludeDo",
-            exclude_do=("Ag", "Au"),
+            mode="指定模式",
+            only_do=("Ag", "Au"),
+            not_do=("Ag2608",),
         )
 
         universe = source.discover_universe()
 
         self.assertEqual(
             {option.symbol for option in universe.options},
-            {"SHFE.CU2608C70000", "SHFE.CU2608P70000"},
+            {"SHFE.AU2608C600", "SHFE.AU2608P600"},
         )
-        self.assertEqual({future.symbol for future in universe.futures}, {"SHFE.CU2608"})
+        self.assertEqual({future.symbol for future in universe.futures}, {"SHFE.AU2608"})
 
 
 class _FakeSymbolInfoApi:
@@ -540,7 +542,7 @@ class _FakeDiscoveryDataSource(TqSdkDataSource):
         quote_subscription_batch_size: int = 10,
         mode: str = "all",
         only_do: tuple[str, ...] = (),
-        exclude_do: tuple[str, ...] = (),
+        not_do: tuple[str, ...] = (),
     ) -> None:
         self.api = api
         self.probe_apis = list(probe_apis)
@@ -549,7 +551,7 @@ class _FakeDiscoveryDataSource(TqSdkDataSource):
             universe=SimpleNamespace(
                 mode=mode,
                 only_do=only_do,
-                exclude_do=exclude_do,
+                not_do=not_do,
                 exchange_ids=("SHFE",) if mode == "all" else (),
                 min_volume=min_volume,
                 min_open_interest=min_open_interest,

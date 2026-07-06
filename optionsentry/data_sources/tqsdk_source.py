@@ -112,20 +112,14 @@ class TqSdkDataSource:
         option_symbols = self._discover_active_symbols(api, "OPTION")
         future_symbols = self._discover_active_symbols(api, "FUTURE")
         metas = self._query_metas(api, sorted(set(option_symbols) | set(future_symbols)))
-        if universe_config.mode == "onlyDo":
-            symbols = _filter_option_symbols_by_terms(metas, universe_config.only_do, exclude=False)
+        if universe_config.mode == "指定模式":
+            included_symbols = set(_filter_option_symbols_by_terms(metas, universe_config.only_do, exclude=False))
+            excluded_symbols = set(_filter_option_symbols_by_terms(metas, universe_config.not_do, exclude=False))
+            symbols = sorted(included_symbols - excluded_symbols)
             self.logger.info(
-                "Applied universe onlyDo filter: terms=%s options %s -> %s.",
+                "Applied universe specified filter: only_do=%s not_do=%s options %s -> %s.",
                 universe_config.only_do,
-                len([meta for meta in metas.values() if meta.is_option]),
-                len(symbols),
-            )
-            return symbols
-        if universe_config.mode == "excludeDo":
-            symbols = _filter_option_symbols_by_terms(metas, universe_config.exclude_do, exclude=True)
-            self.logger.info(
-                "Applied universe excludeDo filter: terms=%s options %s -> %s.",
-                universe_config.exclude_do,
+                universe_config.not_do,
                 len([meta for meta in metas.values() if meta.is_option]),
                 len(symbols),
             )
@@ -982,7 +976,7 @@ def _validate_live_subscription_size(symbols: list[str]) -> None:
         "预处理后需要订阅的合约数量过多，已停止本次预警系统启动。\n\n"
         f"当前需要订阅 {len(symbols)} 个合约，最大允许 {MAX_LIVE_SUBSCRIPTION_SYMBOLS} 个。\n\n"
         "请通过以下方式降低订阅数：\n"
-        "- 将合约范围模式从 all 改为 onlyDo，只填写需要监控的品种或合约关键字。\n"
+        "- 将合约范围模式从 all 改为指定模式，只填写需要监控的品种或合约关键字。\n"
         "- 缩小 exchange_ids，只扫描必要交易所。\n"
         "- 提高 min_volume 或 min_open_interest，过滤低流动性期权。\n"
         "- 减少要监控的到期月份或标的范围。"

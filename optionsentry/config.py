@@ -29,7 +29,7 @@ class RuntimeConfig:
 class UniverseConfig:
     mode: str = "all"
     only_do: tuple[str, ...] = ()
-    exclude_do: tuple[str, ...] = ()
+    not_do: tuple[str, ...] = ()
     exchange_ids: tuple[str, ...] = ()
     min_volume: int = 0
     min_open_interest: int = 0
@@ -208,7 +208,9 @@ def _parse_universe(data: dict[str, Any]) -> UniverseConfig:
     return UniverseConfig(
         mode=str(data.get("mode", "all")),
         only_do=normalize_symbols(_tuple_of_str(_first_present(data, "only_do", "onlyDo", default=()))),
-        exclude_do=normalize_symbols(_tuple_of_str(_first_present(data, "exclude_do", "excludeDo", default=()))),
+        not_do=normalize_symbols(
+            _tuple_of_str(_first_present(data, "not_do", "notDo", "exclude_do", "excludeDo", default=()))
+        ),
         exchange_ids=normalize_symbols(_tuple_of_str(data.get("exchange_ids", ()))),
         min_volume=_integer_value(data.get("min_volume", 0), "universe.min_volume"),
         min_open_interest=_integer_value(data.get("min_open_interest", 0), "universe.min_open_interest"),
@@ -421,12 +423,10 @@ def _validate_config(
         raise ConfigError("runtime.mode must be 'live' or 'backtest'.")
     if runtime.price_basis != "last":
         raise ConfigError("Only runtime.price_basis='last' is supported in this version.")
-    if universe.mode not in {"all", "onlyDo", "excludeDo"}:
-        raise ConfigError("universe.mode must be 'all', 'onlyDo', or 'excludeDo'.")
-    if universe.mode == "onlyDo" and not universe.only_do:
-        raise ConfigError("universe.only_do is required when universe.mode='onlyDo'.")
-    if universe.mode == "excludeDo" and not universe.exclude_do:
-        raise ConfigError("universe.exclude_do is required when universe.mode='excludeDo'.")
+    if universe.mode not in {"all", "指定模式"}:
+        raise ConfigError("universe.mode must be 'all' or '指定模式'.")
+    if universe.mode == "指定模式" and not universe.only_do:
+        raise ConfigError("universe.only_do is required when universe.mode='指定模式'.")
     if universe.min_volume < 0:
         raise ConfigError("universe.min_volume must be non-negative.")
     if universe.min_open_interest < 0:

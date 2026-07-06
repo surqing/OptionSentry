@@ -12,9 +12,12 @@ from optionsentry.config import AppConfig, ConfigError, parse_config
 
 def config_to_data(config: AppConfig) -> dict[str, Any]:
     email = asdict(config.notifier.email)
+    universe = asdict(config.universe)
+    universe["exclude_do"] = None
+    universe["excludeDo"] = None
     return {
         "runtime": asdict(config.runtime),
-        "universe": asdict(config.universe),
+        "universe": universe,
         "datasource": {"tqsdk": asdict(config.tqsdk)},
         "strategies": [_strategy_dict(strategy) for strategy in config.strategies],
         "backtest": _date_strings(asdict(config.backtest)),
