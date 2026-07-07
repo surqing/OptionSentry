@@ -40,7 +40,7 @@ def accept(option, ctx) -> bool:
 | `ins_class` | `str` | 合约类型。传入 `accept` 的对象通常为 `OPTION`。 |
 | `is_option` | `bool` | 是否为期权。当前通常为 `True`。 |
 | `is_future` | `bool` | 是否为期货。传入 `accept` 的 `option` 通常为 `False`。 |
-| `expired` | `Optional[bool]` | 合约是否已下市。`True` 表示该合约已经不属于正常未下市合约范围；期权到期日期或剩余天数应使用 `expire_date`、`expire_datetime`、`expire_rest_days` 或 `last_exercise_date` 判断。 |
+| `expired` | `Optional[bool]` | 合约是否已下市。`True` 表示该合约已经下市。 |
 
 ### 期权属性
 
