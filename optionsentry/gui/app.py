@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QGraphicsOpacityEffect,
@@ -29,6 +31,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSpinBox,
     QDoubleSpinBox,
@@ -210,6 +213,66 @@ class ToastPopup(QWidget):
         x = parent_top_left.x() + max(12, (parent.width() - self.width()) // 2)
         y = parent_top_left.y() + min(88, max(24, parent.height() // 5))
         self.move(x, y)
+
+
+class AddStrategyDialog(QDialog):
+    def __init__(self, strategy_types: Iterable[str], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._strategy_buttons: list[tuple[str, QRadioButton]] = []
+        self.setWindowTitle("添加策略")
+        self.setModal(True)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setMinimumWidth(300)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(12)
+
+        title = QLabel("选择策略")
+        title.setObjectName("dialogTitleLabel")
+        layout.addWidget(title)
+
+        for index, strategy_type in enumerate(strategy_types):
+            button = QRadioButton(strategy_type_display_name(strategy_type))
+            button.setProperty("strategy_type", strategy_type)
+            button.setChecked(index == 0)
+            self._strategy_buttons.append((strategy_type, button))
+            layout.addWidget(button)
+
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        ok_button = button_box.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_button is not None:
+            ok_button.setText("确定")
+            ok_button.setEnabled(bool(self._strategy_buttons))
+        cancel_button = button_box.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_button is not None:
+            cancel_button.setText("取消")
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def selected_strategy_type(self) -> str | None:
+        for strategy_type, button in self._strategy_buttons:
+            if button.isChecked():
+                return strategy_type
+        return None
+
+    def showEvent(self, event: object) -> None:
+        super().showEvent(event)
+        self._center_on_parent()
+
+    def _center_on_parent(self) -> None:
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        parent_window = parent.window()
+        parent_geometry = parent_window.frameGeometry()
+        dialog_geometry = self.frameGeometry()
+        dialog_geometry.moveCenter(parent_geometry.center())
+        self.move(dialog_geometry.topLeft())
 
 
 def _friendly_login_error(message: str) -> str:
@@ -1259,10 +1322,7 @@ class ConfigEditor(QWidget):
         box = QGroupBox("策略")
         layout = QVBoxLayout(box)
         row = QHBoxLayout()
-        self.strategy_type_to_add = NoWheelComboBox()
-        for strategy_type in SUPPORTED_STRATEGY_TYPES:
-            self.strategy_type_to_add.addItem(strategy_type_display_name(strategy_type), strategy_type)
-        self.add_strategy_button = QPushButton("添加")
+        self.add_strategy_button = QPushButton("添加策略")
         self.add_strategy_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
         self.add_strategy_button.clicked.connect(self._add_selected_strategy_row)
         remove_button = QPushButton("删除")
@@ -1271,7 +1331,6 @@ class ConfigEditor(QWidget):
         script_button = QPushButton("选择脚本")
         script_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
         script_button.clicked.connect(self._browse_strategy_filter_script)
-        row.addWidget(self.strategy_type_to_add)
         row.addWidget(self.add_strategy_button)
         row.addWidget(remove_button)
         row.addWidget(script_button)
@@ -1601,9 +1660,17 @@ class ConfigEditor(QWidget):
             _apply_table_filters(self.strategies)
 
     def _add_selected_strategy_row(self) -> None:
-        strategy_type = str(self.strategy_type_to_add.currentData() or self.strategy_type_to_add.currentText())
+        strategy_type = self._prompt_strategy_type_to_add()
+        if strategy_type is None:
+            return
         min_value, max_value = _default_strategy_range(strategy_type)
         self._add_strategy_row(strategy_type, min_value, max_value, "", True)
+
+    def _prompt_strategy_type_to_add(self) -> str | None:
+        dialog = AddStrategyDialog(SUPPORTED_STRATEGY_TYPES, self.window())
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return dialog.selected_strategy_type()
 
     def _browse_strategy_filter_script(self) -> None:
         row = self.strategies.currentRow()
