@@ -31,7 +31,6 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QRadioButton,
     QScrollArea,
     QSpinBox,
     QDoubleSpinBox,
@@ -218,7 +217,6 @@ class ToastPopup(QWidget):
 class AddStrategyDialog(QDialog):
     def __init__(self, strategy_types: Iterable[str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._strategy_buttons: list[tuple[str, QRadioButton]] = []
         self.setWindowTitle("添加策略")
         self.setModal(True)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
@@ -232,12 +230,12 @@ class AddStrategyDialog(QDialog):
         title.setObjectName("dialogTitleLabel")
         layout.addWidget(title)
 
-        for index, strategy_type in enumerate(strategy_types):
-            button = QRadioButton(strategy_type_display_name(strategy_type))
-            button.setProperty("strategy_type", strategy_type)
-            button.setChecked(index == 0)
-            self._strategy_buttons.append((strategy_type, button))
-            layout.addWidget(button)
+        form = QFormLayout()
+        self.strategy_type = NoWheelComboBox()
+        for strategy_type in strategy_types:
+            self.strategy_type.addItem(strategy_type_display_name(strategy_type), strategy_type)
+        form.addRow("策略类型", self.strategy_type)
+        layout.addLayout(form)
 
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -246,7 +244,7 @@ class AddStrategyDialog(QDialog):
         ok_button = button_box.button(QDialogButtonBox.StandardButton.Ok)
         if ok_button is not None:
             ok_button.setText("确定")
-            ok_button.setEnabled(bool(self._strategy_buttons))
+            ok_button.setEnabled(self.strategy_type.count() > 0)
         cancel_button = button_box.button(QDialogButtonBox.StandardButton.Cancel)
         if cancel_button is not None:
             cancel_button.setText("取消")
@@ -255,10 +253,9 @@ class AddStrategyDialog(QDialog):
         layout.addWidget(button_box)
 
     def selected_strategy_type(self) -> str | None:
-        for strategy_type, button in self._strategy_buttons:
-            if button.isChecked():
-                return strategy_type
-        return None
+        if self.strategy_type.count() <= 0:
+            return None
+        return str(self.strategy_type.currentData() or self.strategy_type.currentText())
 
     def showEvent(self, event: object) -> None:
         super().showEvent(event)

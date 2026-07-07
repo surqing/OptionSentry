@@ -12,7 +12,7 @@ from optionsentry.models import AlertEvent, ConditionEvaluation
 class GuiSmokeTests(unittest.TestCase):
     def test_pyqt_login_window_constructs_offscreen(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        from PyQt6.QtWidgets import QApplication, QHeaderView, QRadioButton, QSpinBox, QToolBar
+        from PyQt6.QtWidgets import QApplication, QComboBox, QHeaderView, QSpinBox, QToolBar
         from PyQt6.QtCore import Qt
 
         from optionsentry.config import parse_config
@@ -171,10 +171,19 @@ class GuiSmokeTests(unittest.TestCase):
         dialog = AddStrategyDialog(("cp_combo", "abs_spread"), main_window)
         self.assertTrue(dialog.isModal())
         self.assertEqual(dialog.windowModality(), Qt.WindowModality.ApplicationModal)
-        strategy_buttons = dialog.findChildren(QRadioButton)
-        self.assertEqual([button.text() for button in strategy_buttons], ["CP组合预警", "价差预警"])
+        strategy_combos = dialog.findChildren(QComboBox)
+        self.assertEqual(len(strategy_combos), 1)
+        strategy_combo = strategy_combos[0]
+        self.assertEqual(
+            [strategy_combo.itemText(index) for index in range(strategy_combo.count())],
+            ["CP组合预警", "价差预警"],
+        )
+        self.assertEqual(
+            [strategy_combo.itemData(index) for index in range(strategy_combo.count())],
+            ["cp_combo", "abs_spread"],
+        )
         self.assertEqual(dialog.selected_strategy_type(), "cp_combo")
-        strategy_buttons[1].setChecked(True)
+        strategy_combo.setCurrentIndex(1)
         self.assertEqual(dialog.selected_strategy_type(), "abs_spread")
         row_count = main_window.config_editor.strategies.rowCount()
         with patch.object(main_window.config_editor, "_prompt_strategy_type_to_add", return_value="abs_spread"):
