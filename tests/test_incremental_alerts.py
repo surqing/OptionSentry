@@ -175,7 +175,10 @@ class LivePriceCacheTests(unittest.TestCase):
         self.assertTrue(api.closed)
         self.assertEqual(
             api.quote_list_calls,
-            (("SHFE.au2608", "SHFE.au2608C600", "SHFE.au2608P600"),),
+            (
+                ("SHFE.au2608",),
+                ("SHFE.au2608", "SHFE.au2608C600", "SHFE.au2608P600"),
+            ),
         )
         self.assertEqual(first.prices["SHFE.AU2608"], 600.0)
 

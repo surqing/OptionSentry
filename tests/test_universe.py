@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from optionsentry.config import ConfigError, load_config, parse_config
-from optionsentry.models import InstrumentMeta, Universe
+from optionsentry.models import CategoryMeta, InstrumentMeta, Universe
 from optionsentry.data_sources.tqsdk_source import TqSdkDataSource, _row_to_meta
 from tests.helpers import sample_universe
 
@@ -112,8 +112,10 @@ class UniverseTests(unittest.TestCase):
                 "exchange_id": "SHFE",
                 "ins_class": "OPTION",
                 "price_tick": 0.5,
+                "price_decs": 1,
                 "volume_multiple": 15,
                 "open_limit": 0,
+                "position_limit": 2000,
                 "max_limit_order_volume": 100,
                 "max_market_order_volume": 0,
                 "min_limit_order_volume": 1,
@@ -130,6 +132,7 @@ class UniverseTests(unittest.TestCase):
                 "pre_close": 9,
                 "trading_time_day": [["09:00:00", "10:15:00"], ["13:30:00", "15:00:00"]],
                 "trading_time_night": [["21:00:00", "26:30:00"]],
+                "categories": [{"id": "METAL", "name": "有色"}],
             },
             "SHFE.au2608C600",
         )
@@ -137,8 +140,10 @@ class UniverseTests(unittest.TestCase):
         self.assertEqual(meta.instrument_id, "au2608C600")
         self.assertEqual(meta.exchange_id, "SHFE")
         self.assertEqual(meta.price_tick, 0.5)
+        self.assertEqual(meta.price_decs, 1)
         self.assertEqual(meta.volume_multiple, 15.0)
         self.assertEqual(meta.open_limit, 0.0)
+        self.assertEqual(meta.position_limit, 2000)
         self.assertEqual(meta.max_limit_order_volume, 100.0)
         self.assertEqual(meta.max_market_order_volume, 0.0)
         self.assertEqual(meta.min_limit_order_volume, 1.0)
@@ -155,6 +160,46 @@ class UniverseTests(unittest.TestCase):
         self.assertEqual(meta.pre_close, 9.0)
         self.assertEqual(meta.trading_time_day, (("09:00:00", "10:15:00"), ("13:30:00", "15:00:00")))
         self.assertEqual(meta.trading_time_night, (("21:00:00", "26:30:00"),))
+        self.assertEqual(meta.trading_time["day"], meta.trading_time_day)
+        self.assertEqual(meta.categories, (CategoryMeta(id="METAL", name="有色"),))
+
+    def test_tqsdk_query_metas_enriches_future_quote_metadata(self) -> None:
+        api = _FakeDiscoveryApi(
+            {
+                "SHFE.au2608": {
+                    "instrument_id": "au2608",
+                    "exchange_id": "SHFE",
+                    "ins_class": "FUTURE",
+                    "open_limit": None,
+                    "trading_time_day": [],
+                    "trading_time_night": [],
+                },
+            },
+            quote_fields={
+                "SHFE.au2608": {
+                    "price_decs": 0,
+                    "open_limit": 5000,
+                    "position_limit": 1000,
+                    "exercise_type": "",
+                    "trading_time": {
+                        "day": [["09:00:00", "10:15:00"]],
+                        "night": [["21:00:00", "23:00:00"]],
+                    },
+                    "categories": [{"id": "METAL", "name": "贵金属"}],
+                },
+            },
+        )
+        source = _FakeDiscoveryDataSource(api, min_volume=0, min_open_interest=0)
+
+        metas = source._query_metas(api, ("SHFE.AU2608",), enrich_quote_metadata=True)
+
+        meta = metas["SHFE.AU2608"]
+        self.assertEqual(meta.price_decs, 0)
+        self.assertEqual(meta.open_limit, 5000.0)
+        self.assertEqual(meta.position_limit, 1000)
+        self.assertEqual(meta.trading_time_day, (("09:00:00", "10:15:00"),))
+        self.assertEqual(meta.trading_time_night, (("21:00:00", "23:00:00"),))
+        self.assertEqual(meta.categories, (CategoryMeta(id="METAL", name="贵金属"),))
 
     def test_tqsdk_query_metas_uses_batches(self) -> None:
         api = _FakeSymbolInfoApi()
@@ -411,7 +456,7 @@ class UniverseTests(unittest.TestCase):
             {option.symbol for option in universe.options},
             {"SHFE.AU2608C600", "SHFE.AU2608P620"},
         )
-        self.assertFalse(api.quote_list_calls)
+        self.assertEqual(api.quote_list_calls, (("SHFE.au2608",),))
         self.assertFalse(api.closed)
         self.assertIs(source._live_api, api)
         source.close()
@@ -445,7 +490,7 @@ class UniverseTests(unittest.TestCase):
             {option.symbol for option in universe.options},
             {"SHFE.AU2608C600", "SHFE.AU2608P620"},
         )
-        self.assertEqual(discovery_api.quote_list_calls, ())
+        self.assertEqual(discovery_api.quote_list_calls, (("SHFE.au2608",),))
         self.assertEqual(
             probe_api.quote_list_calls,
             (("SHFE.au2608", "SHFE.au2608C600", "SHFE.au2608C620", "SHFE.au2608P600", "SHFE.au2608P620"),),
@@ -485,7 +530,7 @@ class UniverseTests(unittest.TestCase):
         universe = source.discover_universe()
 
         self.assertEqual(len(universe.options), 4)
-        self.assertEqual(discovery_api.quote_list_calls, ())
+        self.assertEqual(discovery_api.quote_list_calls, (("SHFE.au2608",),))
         self.assertEqual(
             [api.quote_list_calls for api in probe_apis],
             [
@@ -627,9 +672,11 @@ class _FakeDiscoveryApi:
         self,
         rows: dict[str, dict[str, Any]],
         events: tuple["_FakeQuoteEvent", ...] = (),
+        quote_fields: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self.rows = rows
         self.events = list(events)
+        self.quote_fields = quote_fields or {}
         self.quotes: dict[str, _FakeQuote] = {}
         self.quote_list_calls: tuple[tuple[str, ...], ...] = ()
         self.symbol_info_calls: tuple[tuple[str, ...], ...] = ()
@@ -653,6 +700,8 @@ class _FakeDiscoveryApi:
         self.quote_list_calls = (*self.quote_list_calls, tuple(symbols))
         for symbol in symbols:
             self.quotes.setdefault(symbol, _FakeQuote(symbol))
+            for key, value in self.quote_fields.get(symbol, {}).items():
+                setattr(self.quotes[symbol], key, value)
         return [self.quotes[symbol] for symbol in symbols]
 
     def wait_update(self, deadline: float | None = None) -> bool:

@@ -5,12 +5,12 @@ import math
 import os
 import time
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Callable, Iterator
 
 from optionsentry.config import AppConfig, ConfigError
-from optionsentry.models import InstrumentMeta, MarketSnapshot, Universe
+from optionsentry.models import CategoryMeta, InstrumentMeta, MarketSnapshot, Universe
 from optionsentry.symbols import normalize_symbol, tqsdk_api_symbol
 
 
@@ -43,7 +43,11 @@ class TqSdkDataSource:
                     if meta.is_option and meta.underlying_symbol
                 }
             )
-            underlying_metas = self._query_metas(api, underlying_symbols) if underlying_symbols else {}
+            underlying_metas = (
+                self._query_metas(api, underlying_symbols, enrich_quote_metadata=True)
+                if underlying_symbols
+                else {}
+            )
             future_underlyings = {
                 symbol: meta
                 for symbol, meta in underlying_metas.items()
@@ -139,7 +143,12 @@ class TqSdkDataSource:
             symbols.extend(list(api.query_quotes(**kwargs)))
         return sorted(set(symbols))
 
-    def _query_metas(self, api: Any, symbols: list[str] | tuple[str, ...]) -> dict[str, InstrumentMeta]:
+    def _query_metas(
+        self,
+        api: Any,
+        symbols: list[str] | tuple[str, ...],
+        enrich_quote_metadata: bool = False,
+    ) -> dict[str, InstrumentMeta]:
         if not symbols:
             return {}
         result: dict[str, InstrumentMeta] = {}
@@ -186,7 +195,32 @@ class TqSdkDataSource:
                 meta = _row_to_meta(row, fallback_symbol)
                 if meta.symbol:
                     result[meta.symbol] = meta
+        if enrich_quote_metadata:
+            result = self._enrich_quote_metadata(api, result)
         return result
+
+    def _enrich_quote_metadata(self, api: Any, metas: dict[str, InstrumentMeta]) -> dict[str, InstrumentMeta]:
+        future_symbols = sorted(symbol for symbol, meta in metas.items() if meta.is_future)
+        if not future_symbols:
+            return metas
+        enriched = dict(metas)
+        api_symbols_by_symbol = _api_symbols_by_internal_symbol(metas)
+        batch_size = self.config.tqsdk.quote_subscription_batch_size
+        if getattr(getattr(self.config, "runtime", None), "mode", "live") == "backtest":
+            batch_size = min(batch_size, 100)
+        batches = list(_batches(future_symbols, batch_size))
+        for batch_index, batch in enumerate(batches, start=1):
+            self.logger.info(
+                "Enriching future metadata from quote batch %s/%s with %s symbols.",
+                batch_index,
+                len(batches),
+                len(batch),
+            )
+            api_batch = [api_symbols_by_symbol.get(symbol, tqsdk_api_symbol(symbol)) for symbol in batch]
+            quotes = dict(zip(batch, api.get_quote_list(api_batch), strict=True))
+            for symbol, quote in quotes.items():
+                enriched[symbol] = _enrich_meta_from_quote(enriched[symbol], quote)
+        return enriched
 
     def _apply_liquidity_filters(
         self,
@@ -711,13 +745,16 @@ def _row_to_meta(row: Any, fallback_symbol: str) -> InstrumentMeta:
         underlying_symbol=normalize_symbol(api_underlying_symbol) if api_underlying_symbol else "",
         strike_price=_optional_float(_row_get(row, "strike_price")),
         option_class=_clean_str(_row_get(row, "option_class")),
+        exercise_type=_clean_str(_row_get(row, "exercise_type")),
         exercise_year=_optional_int(_row_get(row, "exercise_year")),
         exercise_month=_optional_int(_row_get(row, "exercise_month")),
         instrument_name=_clean_str(_row_get(row, "instrument_name")),
         product_id=_clean_str(_row_get(row, "product_id")),
         price_tick=_optional_float(_row_get(row, "price_tick")),
+        price_decs=_optional_int(_row_get(row, "price_decs")),
         volume_multiple=_optional_float(_row_get(row, "volume_multiple")),
         open_limit=_optional_float(_row_get(row, "open_limit")),
+        position_limit=_optional_int(_row_get(row, "position_limit")),
         max_limit_order_volume=_optional_float(_row_get(row, "max_limit_order_volume")),
         max_market_order_volume=_optional_float(_row_get(row, "max_market_order_volume")),
         min_limit_order_volume=_optional_float(_row_get(row, "min_limit_order_volume")),
@@ -741,9 +778,62 @@ def _row_to_meta(row: Any, fallback_symbol: str) -> InstrumentMeta:
         pre_close=_optional_float(_row_get(row, "pre_close")),
         trading_time_day=_trading_sessions(_row_get(row, "trading_time_day")),
         trading_time_night=_trading_sessions(_row_get(row, "trading_time_night")),
+        categories=_categories(_row_get(row, "categories")),
         api_symbol=api_symbol,
         api_underlying_symbol=api_underlying_symbol,
     )
+
+
+def _enrich_meta_from_quote(meta: InstrumentMeta, quote: Any) -> InstrumentMeta:
+    trading_day, trading_night = _quote_trading_sessions(quote)
+    return replace(
+        meta,
+        price_decs=_coalesce(meta.price_decs, _optional_int(_object_get(quote, "price_decs"))),
+        exercise_type=meta.exercise_type or _clean_str(_object_get(quote, "exercise_type")),
+        open_limit=_coalesce(meta.open_limit, _optional_float(_object_get(quote, "open_limit"))),
+        position_limit=_coalesce(meta.position_limit, _optional_int(_object_get(quote, "position_limit"))),
+        trading_time_day=meta.trading_time_day or trading_day,
+        trading_time_night=meta.trading_time_night or trading_night,
+        categories=meta.categories or _categories(_object_get(quote, "categories")),
+    )
+
+
+def _coalesce(value: Any, fallback: Any) -> Any:
+    return value if value is not None else fallback
+
+
+def _object_get(value: Any, key: str) -> Any:
+    if value is None:
+        return None
+    with suppress(Exception):
+        return value[key]
+    with suppress(Exception):
+        return getattr(value, key)
+    return None
+
+
+def _quote_trading_sessions(quote: Any) -> tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]:
+    trading_time = _object_get(quote, "trading_time")
+    return (
+        _trading_sessions(_object_get(trading_time, "day")),
+        _trading_sessions(_object_get(trading_time, "night")),
+    )
+
+
+def _categories(value: Any) -> tuple[CategoryMeta, ...]:
+    if value is None:
+        return ()
+    try:
+        iterator = iter(value)
+    except TypeError:
+        return ()
+    categories: list[CategoryMeta] = []
+    for item in iterator:
+        category_id = _clean_str(_object_get(item, "id"))
+        name = _clean_str(_object_get(item, "name"))
+        if category_id or name:
+            categories.append(CategoryMeta(id=category_id, name=name))
+    return tuple(categories)
 
 
 def _row_get(row: Any, key: str) -> Any:

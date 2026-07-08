@@ -8,6 +8,12 @@ from optionsentry.symbols import normalize_symbol, normalize_symbols
 
 
 @dataclass(frozen=True)
+class CategoryMeta:
+    id: str
+    name: str
+
+
+@dataclass(frozen=True)
 class InstrumentMeta:
     symbol: str
     ins_class: str
@@ -16,13 +22,16 @@ class InstrumentMeta:
     underlying_symbol: str = ""
     strike_price: float | None = None
     option_class: str = ""
+    exercise_type: str = ""
     exercise_year: int | None = None
     exercise_month: int | None = None
     instrument_name: str = ""
     product_id: str = ""
     price_tick: float | None = None
+    price_decs: int | None = None
     volume_multiple: float | None = None
     open_limit: float | None = None
+    position_limit: int | None = None
     max_limit_order_volume: float | None = None
     max_market_order_volume: float | None = None
     min_limit_order_volume: float | None = None
@@ -46,6 +55,7 @@ class InstrumentMeta:
     pre_close: float | None = None
     trading_time_day: tuple[tuple[str, str], ...] = ()
     trading_time_night: tuple[tuple[str, str], ...] = ()
+    categories: tuple[CategoryMeta, ...] = ()
     api_symbol: str = ""
     api_underlying_symbol: str = ""
 
@@ -60,6 +70,7 @@ class InstrumentMeta:
             "api_underlying_symbol",
             str(self.api_underlying_symbol or underlying_symbol).strip(),
         )
+        object.__setattr__(self, "categories", tuple(self.categories))
 
     @property
     def is_option(self) -> bool:
@@ -82,6 +93,10 @@ class InstrumentMeta:
     @property
     def last_exercise_date(self) -> date | None:
         return _date_from_timestamp(self.last_exercise_datetime)
+
+    @property
+    def trading_time(self) -> dict[str, tuple[tuple[str, str], ...]]:
+        return {"day": self.trading_time_day, "night": self.trading_time_night}
 
 
 def _date_from_timestamp(value: float | None) -> date | None:
