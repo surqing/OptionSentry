@@ -22,8 +22,8 @@ min_open_interest = 0
 # password = "your-tqsdk-password"
 username_env = "TQSDK_USERNAME"
 password_env = "TQSDK_PASSWORD"
-symbol_info_batch_size = 500
-quote_subscription_batch_size = 500
+symbol_info_batch_size = 1000
+quote_subscription_batch_size = 1000
 
 [[strategies]]
 type = "cp_combo"
