@@ -4,6 +4,21 @@ from pathlib import Path
 import shutil
 
 
+def copy_user_filter_scripts(dist_path):
+    source_path = Path("user_filter_scripts")
+    target_path = dist_path / "user_filter_scripts"
+    if target_path.exists():
+        shutil.rmtree(target_path)
+    if not source_path.exists():
+        target_path.mkdir(parents=True, exist_ok=True)
+        return
+    shutil.copytree(
+        source_path,
+        target_path,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+    )
+
+
 a = Analysis(
     ["optionsentry_gui.py"],
     pathex=[],
@@ -59,3 +74,4 @@ shutil.copyfile(
 config_path = dist_path / "config.toml"
 if not config_path.exists():
     shutil.copyfile(Path("config.example.toml"), config_path)
+copy_user_filter_scripts(dist_path)

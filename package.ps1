@@ -176,6 +176,7 @@ $ExePath = Resolve-WorkspacePath -Root $Root -RelativePath "dist\optionsentry-gu
 $LegacyExePath = Resolve-WorkspacePath -Root $Root -RelativePath "dist\optionsentry-gui.exe"
 $ConfigPath = Resolve-WorkspacePath -Root $Root -RelativePath "dist\optionsentry-gui\config.toml"
 $ExampleConfigPath = Resolve-WorkspacePath -Root $Root -RelativePath "dist\optionsentry-gui\config.example.toml"
+$UserFilterScriptsPath = Resolve-WorkspacePath -Root $Root -RelativePath "dist\optionsentry-gui\user_filter_scripts"
 $StagingPath = Resolve-WorkspacePath -Root $Root -RelativePath "dist\$PackageBaseName"
 $ZipPath = Resolve-WorkspacePath -Root $Root -RelativePath "dist\$PackageBaseName.zip"
 $HashPath = Resolve-WorkspacePath -Root $Root -RelativePath "dist\$PackageBaseName.zip.sha256.txt"
@@ -235,6 +236,13 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
 if (-not (Test-Path -LiteralPath $ExampleConfigPath)) {
     throw "Example config file was not generated: $ExampleConfigPath"
 }
+if (-not (Test-Path -LiteralPath $UserFilterScriptsPath -PathType Container)) {
+    throw "User filter scripts directory was not generated: $UserFilterScriptsPath"
+}
+$userFilterScriptFiles = @(Get-ChildItem -LiteralPath $UserFilterScriptsPath -Filter "*.py" -File)
+if (-not $userFilterScriptFiles) {
+    throw "User filter scripts directory does not contain any Python scripts: $UserFilterScriptsPath"
+}
 
 Invoke-CodeSigning -ExePath $ExePath -Thumbprint $SignThumbprint -TimestampUrl $TimestampUrl
 
@@ -267,6 +275,9 @@ Remove-WorkspaceItem -Root $Root -RelativePath "dist\$PackageBaseName" -Recurse
 Write-Step "Package ready"
 Get-ChildItem -LiteralPath $OnedirPath -File |
     Where-Object { $_.Name -in @("optionsentry-gui.exe", "config.toml", "config.example.toml") } |
+    Select-Object Name, Length, LastWriteTime |
+    Format-Table -AutoSize
+Get-ChildItem -LiteralPath $UserFilterScriptsPath -File |
     Select-Object Name, Length, LastWriteTime |
     Format-Table -AutoSize
 Get-ChildItem -LiteralPath $DistPath -File |
