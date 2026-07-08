@@ -1,6 +1,3 @@
-from __future__ import annotations
-
-
 # Keep options whose remaining days to expiry are in this inclusive range.
 # Edit these values to match the range you want to monitor.
 MIN_EXPIRE_REST_DAYS = 10
