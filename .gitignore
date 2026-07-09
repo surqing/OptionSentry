@@ -43,3 +43,6 @@ test_ouput/
 .idea/
 .DS_Store
 Thumbs.db
+
+# AI Agents
+.workbuddy/
