@@ -589,7 +589,6 @@ class MainWindow(QMainWindow):
             ("价格合约", "price_symbols"),
             ("策略", "strategies"),
             ("条件数", "conditions"),
-            ("周期", "cycles"),
             ("活跃预警", "active"),
             ("累计预警", "alerts"),
             ("最新时间", "timestamp"),
@@ -716,7 +715,6 @@ class MainWindow(QMainWindow):
         self._set_status("conditions", str(total_conditions))
 
     def _on_cycle(self, cycle: RunnerCycle) -> None:
-        self._set_status("cycles", str(cycle.cycle_count))
         self._set_status("active", str(cycle.active_count))
         self._set_status("alerts", str(cycle.total_alerts))
         self._set_status("timestamp", _format_status_timestamp(cycle.timestamp))
