@@ -234,7 +234,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\package.ps1 -SkipTests -No
 │   ├── cli.py                    # 命令行入口
 │   ├── config.py                 # TOML 配置解析与校验
 │   ├── runner.py                 # 监控运行循环
-│   ├── strategies.py             # 内置策略
+│   ├── strategies.py             # 策略兼容导出与构造入口
+│   ├── strategy_base.py          # 策略基类与展示元数据
+│   ├── strategy_registry.py      # 内置策略自动发现与注册表
+│   ├── strategy_types/           # 自注册的内置策略实现
 │   ├── notifiers.py              # 文件和邮件告警
 │   ├── data_sources/             # TqSdk 数据源
 │   └── gui/                      # PyQt6 图形界面

@@ -48,23 +48,26 @@ from optionsentry.config import (
     AppConfig,
     ActiveAlertsViewConfig,
     ConfigError,
-    SUPPORTED_STRATEGY_TYPES,
     load_config,
     strategy_display_name,
     strategy_type_display_name,
 )
+from optionsentry.formatting import format_key_bound, format_key_range
 from optionsentry.gui.config_store import data_to_config, save_config
 from optionsentry.gui.credentials import CredentialResolution, load_and_validate_login
 from optionsentry.gui.runner_adapter import GuiRunSignals, build_gui_runner
 from optionsentry.models import AlertEvent, ConditionEvaluation, Universe
 from optionsentry.runner import RunnerCycle
+from optionsentry.strategy_base import MetricColumn
 from optionsentry.strategy_filters import validate_strategy_filters
+from optionsentry.strategy_registry import (
+    get_strategy_class,
+    parse_alert_key,
+    supported_strategy_types,
+)
 from optionsentry.strategies import (
-    CALL_MONEYNESS_METRIC,
-    PUT_MONEYNESS_METRIC,
-    SPREAD_A_MONEYNESS_METRIC,
-    SPREAD_AVG_MONEYNESS_METRIC,
-    SPREAD_B_MONEYNESS_METRIC,
+    CP_NEGATIVE_VALUE_COLOR,
+    CP_POSITIVE_VALUE_COLOR,
 )
 
 
@@ -88,10 +91,6 @@ SORT_ROLE = Qt.ItemDataRole.UserRole
 TOAST_DURATION_MS = 1500
 TOAST_FADE_MS = 150
 ALERT_SOUND_BEEP_INTERVAL_MS = 700
-CP_NEGATIVE_VALUE_COLOR = "#d8ecdf"
-CP_POSITIVE_VALUE_COLOR = "#f1d7d2"
-
-
 def app_icon() -> QIcon:
     return QIcon(str(APP_ICON_PATH))
 
@@ -1007,7 +1006,7 @@ class StrategyEvaluationTable(QGroupBox):
         self._strategy_types_by_name: dict[str, set[str]] = {}
         self._records: list[_EvaluationRecord] = []
         self._buttons: dict[str | None, QPushButton] = {}
-        self._table_shape: tuple[bool, tuple[str, ...]] | None = None
+        self._table_shape: tuple[bool, tuple[MetricColumn, ...]] | None = None
 
         layout = QVBoxLayout(self)
         filter_row = QHBoxLayout()
@@ -1125,41 +1124,45 @@ class StrategyEvaluationTable(QGroupBox):
             vertical_scroll.setValue(min(previous_vertical, vertical_scroll.maximum()))
             horizontal_scroll.setValue(min(previous_horizontal, horizontal_scroll.maximum()))
 
-    def _metric_columns(self, records: list[_EvaluationRecord], include_strategy: bool) -> tuple[str, ...]:
+    def _metric_columns(
+        self,
+        records: list[_EvaluationRecord],
+        include_strategy: bool,
+    ) -> tuple[MetricColumn, ...]:
         if include_strategy or not self._show_moneyness_columns:
             return ()
         strategy_types = self._strategy_types_by_name.get(self._selected_strategy or "", set())
-        if strategy_types == {"cp_combo"}:
-            return (CALL_MONEYNESS_METRIC, PUT_MONEYNESS_METRIC)
-        if strategy_types == {"abs_spread"}:
-            return (
-                SPREAD_A_MONEYNESS_METRIC,
-                SPREAD_B_MONEYNESS_METRIC,
-                SPREAD_AVG_MONEYNESS_METRIC,
-            )
+        if len(strategy_types) == 1:
+            try:
+                return get_strategy_class(next(iter(strategy_types))).metric_columns
+            except ValueError:
+                pass
         metric_names = {
             metric_name
             for record in records
             for metric_name in record.evaluation.metrics
         }
-        if any(metric_name in metric_names for metric_name in (CALL_MONEYNESS_METRIC, PUT_MONEYNESS_METRIC)):
-            return (CALL_MONEYNESS_METRIC, PUT_MONEYNESS_METRIC)
-        if any(
-            metric_name in metric_names
-            for metric_name in (
-                SPREAD_A_MONEYNESS_METRIC,
-                SPREAD_B_MONEYNESS_METRIC,
-                SPREAD_AVG_MONEYNESS_METRIC,
-            )
-        ):
-            return (
-                SPREAD_A_MONEYNESS_METRIC,
-                SPREAD_B_MONEYNESS_METRIC,
-                SPREAD_AVG_MONEYNESS_METRIC,
-            )
-        return ()
+        columns: list[MetricColumn] = []
+        seen_names: set[str] = set()
+        for strategy_type in supported_strategy_types():
+            strategy_columns = get_strategy_class(strategy_type).metric_columns
+            if any(column.name in metric_names for column in strategy_columns):
+                for column in strategy_columns:
+                    if column.name not in seen_names:
+                        columns.append(column)
+                        seen_names.add(column.name)
+        for record in records:
+            for metric_name in record.evaluation.metrics:
+                if metric_name not in seen_names:
+                    columns.append(MetricColumn(metric_name))
+                    seen_names.add(metric_name)
+        return tuple(columns)
 
-    def _ensure_table_shape(self, include_strategy: bool, metric_columns: tuple[str, ...]) -> None:
+    def _ensure_table_shape(
+        self,
+        include_strategy: bool,
+        metric_columns: tuple[MetricColumn, ...],
+    ) -> None:
         table_shape = (include_strategy, metric_columns)
         if self._table_shape == table_shape:
             return
@@ -1171,15 +1174,13 @@ class StrategyEvaluationTable(QGroupBox):
             headers = ("时间", "值", "预警范围", "合约")
             widths = (165, 100, 150, 360)
         if metric_columns:
-            metric_widths = tuple(
-                115 if metric_name == SPREAD_AVG_MONEYNESS_METRIC else 105
-                for metric_name in metric_columns
-            )
+            metric_names = tuple(column.name for column in metric_columns)
+            metric_widths = tuple(column.width for column in metric_columns)
             if include_strategy:
-                headers = (*headers[:3], *metric_columns, *headers[3:])
+                headers = (*headers[:3], *metric_names, *headers[3:])
                 widths = (*widths[:3], *metric_widths, *widths[3:])
             else:
-                headers = (*headers[:2], *metric_columns, *headers[2:])
+                headers = (*headers[:2], *metric_names, *headers[2:])
                 widths = (*widths[:2], *metric_widths, *widths[2:])
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
@@ -1189,7 +1190,7 @@ class StrategyEvaluationTable(QGroupBox):
         self,
         record: _EvaluationRecord,
         include_strategy: bool,
-        metric_columns: tuple[str, ...],
+        metric_columns: tuple[MetricColumn, ...],
     ) -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
@@ -1203,7 +1204,7 @@ class StrategyEvaluationTable(QGroupBox):
         if include_strategy:
             values.insert(1, (evaluation.strategy_name, evaluation.strategy_name.casefold()))
         if metric_columns:
-            values.extend(_moneyness_cells(evaluation, metric_columns))
+            values.extend(_moneyness_cells(evaluation, tuple(column.name for column in metric_columns)))
         values.extend(
             [
                 (
@@ -1601,9 +1602,11 @@ class ConfigEditor(QWidget):
 
     def _strategy_data(self) -> list[dict[str, Any]]:
         rows = []
+        supported_types = supported_strategy_types()
+        default_strategy_type = supported_types[0] if supported_types else ""
         for row in range(self.strategies.rowCount()):
             selected = _table_checked(self.strategies, row, 0)
-            strategy_type = _table_text(self.strategies, row, 1) or "cp_combo"
+            strategy_type = _table_text(self.strategies, row, 1) or default_strategy_type
             min_value = float(_table_text(self.strategies, row, 2) or "-inf")
             max_value = float(_table_text(self.strategies, row, 3) or "inf")
             name = _table_text(self.strategies, row, 4)
@@ -1667,7 +1670,7 @@ class ConfigEditor(QWidget):
         self._add_strategy_row(strategy_type, min_value, max_value, "", True)
 
     def _prompt_strategy_type_to_add(self) -> str | None:
-        dialog = AddStrategyDialog(SUPPORTED_STRATEGY_TYPES, self.window())
+        dialog = AddStrategyDialog(supported_strategy_types(), self.window())
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None
         return dialog.selected_strategy_type()
@@ -1937,19 +1940,18 @@ def _format_status_timestamp(timestamp: str) -> str:
 
 
 def _format_warning_range(min_value: float, max_value: float) -> str:
-    return f"({_format_bound(min_value)}, {_format_bound(max_value)})"
+    return format_key_range(min_value, max_value)
 
 
 def _format_bound(value: float) -> str:
-    if math.isinf(value):
-        return "inf" if value > 0 else "-inf"
-    return f"{value:g}"
+    return format_key_bound(value)
 
 
 def _default_strategy_range(strategy_type: str) -> tuple[float, float]:
-    if strategy_type == "abs_spread":
-        return -math.inf, 0.1
-    return 0.01, math.inf
+    try:
+        return get_strategy_class(strategy_type).default_range()
+    except ValueError:
+        return 0.01, math.inf
 
 
 def _split_csv(value: str) -> list[str]:
@@ -1972,21 +1974,19 @@ def _default_config_path() -> Path:
 
 
 def _evaluation_row_background(evaluation: ConditionEvaluation) -> QBrush | None:
-    if not _is_cp_combo_evaluation(evaluation):
+    strategy_type = evaluation.strategy_type
+    if not strategy_type and evaluation.strategy_name in supported_strategy_types():
+        strategy_type = evaluation.strategy_name
+    if not strategy_type:
+        parsed = parse_alert_key(evaluation.key)
+        strategy_type = parsed.strategy_type if parsed is not None else ""
+    if not strategy_type:
         return None
-    if evaluation.value < 0:
-        return QBrush(QColor(CP_NEGATIVE_VALUE_COLOR))
-    if evaluation.value > 0:
-        return QBrush(QColor(CP_POSITIVE_VALUE_COLOR))
-    return None
-
-
-def _is_cp_combo_evaluation(evaluation: ConditionEvaluation) -> bool:
-    if evaluation.strategy_name == "cp_combo":
-        return True
-    parts = evaluation.key.split(":")
-    # Strategy names can be localized, so the CP key shape is the stable marker.
-    return len(parts) >= 6 and parts[3].startswith("K=")
+    try:
+        color = get_strategy_class(strategy_type).row_background_color(evaluation)
+    except ValueError:
+        return None
+    return QBrush(QColor(color)) if color else None
 
 
 def _table_item(text: str, sort_key: object | None = None) -> SortableTableWidgetItem:

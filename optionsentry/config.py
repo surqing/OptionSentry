@@ -67,15 +67,13 @@ class StrategyConfig:
     filter_scope: str = "options"
 
 
-DEFAULT_STRATEGY_DISPLAY_NAMES = {
-    "cp_combo": "CP组合预警",
-    "abs_spread": "价差预警",
-}
-SUPPORTED_STRATEGY_TYPES = tuple(DEFAULT_STRATEGY_DISPLAY_NAMES)
-
-
 def strategy_type_display_name(strategy_type: str) -> str:
-    return DEFAULT_STRATEGY_DISPLAY_NAMES.get(strategy_type, strategy_type)
+    from optionsentry.strategy_registry import get_strategy_class
+
+    try:
+        return get_strategy_class(strategy_type).display_name
+    except ValueError:
+        return strategy_type
 
 
 def strategy_display_name(strategy: StrategyConfig) -> str:
@@ -274,60 +272,45 @@ def _parse_strategy_item(
     name: str | None,
     selected: bool,
 ) -> tuple[StrategyConfig, ...]:
+    from optionsentry.strategy_registry import get_strategy_class
+
+    try:
+        strategy_class = get_strategy_class(strategy_type)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+
+    explicit_range: tuple[float, float] | None = None
+    threshold: float | None = None
     if "min_value" in item or "max_value" in item:
         if "min_value" not in item or "max_value" not in item:
             raise ConfigError(f"Strategy {strategy_type} requires both min_value and max_value.")
-        return (
-            StrategyConfig(
-                type=strategy_type,
-                min_value=_float_value(item["min_value"], f"Strategy {strategy_type} min_value"),
-                max_value=_float_value(item["max_value"], f"Strategy {strategy_type} max_value"),
-                name=name,
-                selected=selected,
-                filter_script=_optional_str(item.get("filter_script")),
-                filter_function=str(item.get("filter_function", "accept") or "accept"),
-                filter_scope=str(item.get("filter_scope", "options") or "options"),
-            ),
+        explicit_range = (
+            _float_value(item["min_value"], f"Strategy {strategy_type} min_value"),
+            _float_value(item["max_value"], f"Strategy {strategy_type} max_value"),
         )
-    if "threshold" not in item:
-        raise ConfigError(f"Strategy {strategy_type} requires min_value and max_value.")
-    threshold = _float_value(item["threshold"], f"Strategy {strategy_type} threshold")
-    if threshold < 0:
-        raise ConfigError(f"Strategy threshold must be non-negative: {strategy_type}")
-    if strategy_type == "cp_combo":
-        return (
-            StrategyConfig(
-                type=strategy_type,
-                min_value=threshold,
-                max_value=math.inf,
-                name=name,
-                selected=selected,
-                filter_script=_optional_str(item.get("filter_script")),
-                filter_function=str(item.get("filter_function", "accept") or "accept"),
-                filter_scope=str(item.get("filter_scope", "options") or "options"),
-            ),
-            StrategyConfig(
-                type=strategy_type,
-                min_value=-math.inf,
-                max_value=-threshold,
-                name=name,
-                selected=selected,
-                filter_script=_optional_str(item.get("filter_script")),
-                filter_function=str(item.get("filter_function", "accept") or "accept"),
-                filter_scope=str(item.get("filter_scope", "options") or "options"),
-            ),
-        )
-    return (
+    else:
+        if "threshold" not in item:
+            raise ConfigError(f"Strategy {strategy_type} requires min_value and max_value.")
+        threshold = _float_value(item["threshold"], f"Strategy {strategy_type} threshold")
+        if threshold < 0:
+            raise ConfigError(f"Strategy threshold must be non-negative: {strategy_type}")
+
+    ranges = strategy_class.expand_ranges(explicit_range=explicit_range, threshold=threshold)
+    filter_script = _optional_str(item.get("filter_script"))
+    filter_function = str(item.get("filter_function", "accept") or "accept")
+    filter_scope = str(item.get("filter_scope", "options") or "options")
+    return tuple(
         StrategyConfig(
             type=strategy_type,
-            min_value=-math.inf,
-            max_value=threshold,
+            min_value=min_value,
+            max_value=max_value,
             name=name,
             selected=selected,
-            filter_script=_optional_str(item.get("filter_script")),
-            filter_function=str(item.get("filter_function", "accept") or "accept"),
-            filter_scope=str(item.get("filter_scope", "options") or "options"),
-        ),
+            filter_script=filter_script,
+            filter_function=filter_function,
+            filter_scope=filter_scope,
+        )
+        for min_value, max_value in ranges
     )
 
 
@@ -419,6 +402,8 @@ def _validate_config(
     logging_config: LoggingConfig,
     gui: GuiConfig,
 ) -> None:
+    from optionsentry.strategy_registry import supported_strategy_types
+
     if runtime.mode not in {"live", "backtest"}:
         raise ConfigError("runtime.mode must be 'live' or 'backtest'.")
     if runtime.price_basis != "last":
@@ -455,7 +440,7 @@ def _validate_config(
     if not strategies:
         raise ConfigError("At least one [[strategies]] entry is required.")
     for strategy in strategies:
-        if strategy.type not in SUPPORTED_STRATEGY_TYPES:
+        if strategy.type not in supported_strategy_types():
             raise ConfigError(f"Unsupported strategy type: {strategy.type}")
         if strategy.filter_scope != "options":
             raise ConfigError(f"Strategy filter_scope must be 'options': {strategy.type}")

@@ -3,6 +3,8 @@
 from pathlib import Path
 import shutil
 
+from PyInstaller.utils.hooks import collect_submodules
+
 
 def copy_user_filter_scripts(dist_path):
     source_path = Path("user_filter_scripts")
@@ -26,9 +28,7 @@ a = Analysis(
     datas=[
         ("optionsentry/gui/assets", "optionsentry/gui/assets"),
     ],
-    hiddenimports=[
-        "PyQt6.QtSvg",
-    ],
+    hiddenimports=["PyQt6.QtSvg", *collect_submodules("optionsentry.strategy_types")],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

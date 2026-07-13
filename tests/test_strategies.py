@@ -4,6 +4,7 @@ import math
 import unittest
 
 from optionsentry.config import StrategyConfig, parse_config, strategy_display_name
+from optionsentry.models import InstrumentMeta, Universe
 from optionsentry.strategies import (
     CALL_MONEYNESS_METRIC,
     PUT_MONEYNESS_METRIC,
@@ -18,6 +19,47 @@ from tests.helpers import sample_universe, snapshot
 
 
 class StrategyTests(unittest.TestCase):
+    def test_abs_spread_structured_strikes_match_symbol_tail_used_by_legacy_email(self) -> None:
+        universe = Universe(
+            instruments={
+                "SHFE.au2608": InstrumentMeta("SHFE.au2608", "FUTURE"),
+                "SHFE.au2608C600.0": InstrumentMeta(
+                    "SHFE.au2608C600.0",
+                    "OPTION",
+                    underlying_symbol="SHFE.au2608",
+                    strike_price=600.0,
+                    option_class="CALL",
+                    exercise_year=2026,
+                    exercise_month=8,
+                ),
+                "SHFE.au2608C620.0": InstrumentMeta(
+                    "SHFE.au2608C620.0",
+                    "OPTION",
+                    underlying_symbol="SHFE.au2608",
+                    strike_price=620.0,
+                    option_class="CALL",
+                    exercise_year=2026,
+                    exercise_month=8,
+                ),
+            }
+        )
+        snap = snapshot(
+            universe,
+            {
+                "SHFE.au2608": 610.0,
+                "SHFE.au2608C600.0": 11.0,
+                "SHFE.au2608C620.0": 10.0,
+            },
+        )
+
+        evaluation = AbsSpreadStrategy(min_value=float("-inf"), max_value=0.1).evaluate(
+            snap,
+            universe,
+        )[0]
+
+        self.assertEqual(evaluation.fields["first_strike"], "600.0")
+        self.assertEqual(evaluation.fields["second_strike"], "620.0")
+
     def test_strategy_display_name_defaults_to_chinese_label(self) -> None:
         cp_config = StrategyConfig(type="cp_combo", min_value=0.01, max_value=float("inf"))
         spread_config = StrategyConfig(type="abs_spread", min_value=float("-inf"), max_value=0.1)
@@ -88,6 +130,27 @@ class StrategyTests(unittest.TestCase):
 
         active = [item for item in evaluations if item.active]
         self.assertEqual(len(active), 1)
+        self.assertEqual(
+            active[0].key,
+            "cp_combo:SHFE.AU2608:2026-8:K=600:SHFE.AU2608C600:"
+            "SHFE.AU2608P600:R=0.01..inf",
+        )
+        self.assertEqual(active[0].strategy_type, "cp_combo")
+        self.assertEqual(
+            active[0].fields,
+            {
+                "underlying": "SHFE.AU2608",
+                "expiry": "2026-8",
+                "strike": "600",
+                "call_symbol": "SHFE.AU2608C600",
+                "put_symbol": "SHFE.AU2608P600",
+            },
+        )
+        self.assertEqual(
+            active[0].message,
+            "cp_combo SHFE.AU2608:2026-8 K=600 value=0.03559322 range=(0.01, inf) "
+            "symbols=SHFE.AU2608C600,SHFE.AU2608P600,SHFE.AU2608",
+        )
         self.assertAlmostEqual(active[0].value, (12.0 - 1.0 + 600.0 - 590.0) / 590.0)
         self.assertAlmostEqual(active[0].metrics[CALL_MONEYNESS_METRIC], (590.0 - 600.0) / 590.0)
         self.assertAlmostEqual(active[0].metrics[PUT_MONEYNESS_METRIC], (600.0 - 590.0) / 590.0)
@@ -159,6 +222,19 @@ class StrategyTests(unittest.TestCase):
         self.assertTrue(all(item.active for item in evaluations))
         call_eval = next(item for item in evaluations if ":CALL:" in item.key)
         put_eval = next(item for item in evaluations if ":PUT:" in item.key)
+        self.assertEqual(call_eval.strategy_type, "abs_spread")
+        self.assertEqual(
+            call_eval.fields,
+            {
+                "underlying": "SHFE.AU2608",
+                "expiry": "2026-8",
+                "option_class": "CALL",
+                "first_symbol": "SHFE.AU2608C600",
+                "second_symbol": "SHFE.AU2608C620",
+                "first_strike": "600",
+                "second_strike": "620",
+            },
+        )
         self.assertEqual(call_eval.symbols, ("SHFE.AU2608C600", "SHFE.AU2608C620"))
         self.assertEqual(put_eval.symbols, ("SHFE.AU2608P620", "SHFE.AU2608P600"))
         self.assertAlmostEqual(call_eval.value, (11.0 - 10.0) / (600.0 - 620.0))

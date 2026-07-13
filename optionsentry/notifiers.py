@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import smtplib
 import time
@@ -13,9 +12,11 @@ from html import escape
 from pathlib import Path
 from typing import Protocol
 
-from optionsentry.config import AppConfig, ConfigError, EmailConfig
+from optionsentry.config import AppConfig, ConfigError, EmailConfig, strategy_type_display_name
+from optionsentry.formatting import format_display_number, format_display_range
 from optionsentry.log_paths import mode_scoped_file
 from optionsentry.models import AlertEvent
+from optionsentry.strategy_registry import get_strategy_class, parse_alert_key
 
 
 class NotificationError(RuntimeError):
@@ -289,38 +290,34 @@ def _email_rows(events: tuple[AlertEvent, ...]) -> tuple[_EmailAlertRow, ...]:
 def _email_row(event: AlertEvent) -> _EmailAlertRow:
     evaluation = event.evaluation
     strategy_label = _strategy_label(evaluation.strategy_name)
-    parsed = _parse_alert_key(evaluation.key)
-    if parsed.get("strategy_type") == "cp_combo":
-        monitor = f"{parsed.get('underlying', '')} {parsed.get('expiry', '')}".strip()
-        strike = parsed.get("strike", "-")
-        value = _format_number(evaluation.value)
-        warning_range = _format_range(evaluation.min_value, evaluation.max_value)
+    strategy_type = evaluation.strategy_type
+    fields = dict(evaluation.fields)
+    if not strategy_type or not fields:
+        parsed = parse_alert_key(evaluation.key)
+        if parsed is not None:
+            strategy_type = strategy_type or parsed.strategy_type
+            fields = fields or parsed.fields
+
+    strategy_class = None
+    if strategy_type:
+        try:
+            strategy_class = get_strategy_class(strategy_type)
+        except ValueError:
+            pass
+
+    value = format_display_number(evaluation.value)
+    warning_range = format_display_range(evaluation.min_value, evaluation.max_value)
+    if strategy_class is not None:
+        presentation = strategy_class.email_presentation(fields)
         return _EmailAlertRow(
             timestamp=str(event.timestamp),
             strategy_label=strategy_label,
-            monitor=monitor or "-",
-            structure="认购 + 认沽 + 标的",
-            strike=f"K={strike}" if strike else "-",
+            monitor=presentation.monitor,
+            structure=presentation.structure,
+            strike=presentation.strike,
             value=value,
             warning_range=warning_range,
-            trigger_condition=_range_condition("偏离率", warning_range),
-            symbols=", ".join(evaluation.symbols),
-        )
-    if parsed.get("strategy_type") == "abs_spread":
-        direction = _option_class_label(parsed.get("option_class", ""))
-        first_strike = parsed.get("first_strike", "")
-        second_strike = parsed.get("second_strike", "")
-        value = _format_number(evaluation.value)
-        warning_range = _format_range(evaluation.min_value, evaluation.max_value)
-        return _EmailAlertRow(
-            timestamp=str(event.timestamp),
-            strategy_label=strategy_label,
-            monitor=f"{parsed.get('underlying', '')} {parsed.get('expiry', '')}".strip() or "-",
-            structure=direction,
-            strike=f"{first_strike} / {second_strike}" if first_strike and second_strike else "-",
-            value=value,
-            warning_range=warning_range,
-            trigger_condition=_range_condition("价差比例", warning_range),
+            trigger_condition=_range_condition(presentation.metric_label, warning_range),
             symbols=", ".join(evaluation.symbols),
         )
     return _EmailAlertRow(
@@ -329,8 +326,8 @@ def _email_row(event: AlertEvent) -> _EmailAlertRow:
         monitor="-",
         structure="-",
         strike="-",
-        value=_format_number(evaluation.value),
-        warning_range=_format_range(evaluation.min_value, evaluation.max_value),
+        value=value,
+        warning_range=warning_range,
         trigger_condition=_generic_range_condition(evaluation.min_value, evaluation.max_value),
         symbols=", ".join(evaluation.symbols),
     )
@@ -356,72 +353,11 @@ def _range_condition(metric_label: str, warning_range: str) -> str:
 
 
 def _generic_range_condition(min_value: float, max_value: float) -> str:
-    return _range_condition("当前指标值", _format_range(min_value, max_value))
+    return _range_condition("当前指标值", format_display_range(min_value, max_value))
 
 
 def _strategy_label(strategy_name: str) -> str:
-    return {
-        "abs_spread": "价差预警",
-        "cp_combo": "CP组合预警",
-    }.get(strategy_name, strategy_name)
-
-
-def _option_class_label(option_class: str) -> str:
-    return {
-        "CALL": "认购",
-        "PUT": "认沽",
-    }.get(option_class, option_class or "-")
-
-
-def _parse_alert_key(key: str) -> dict[str, str]:
-    parts = key.split(":")
-    if len(parts) >= 6 and (parts[0] == "cp_combo" or parts[3].startswith("K=")):
-        return {
-            "strategy": parts[0],
-            "strategy_type": "cp_combo",
-            "underlying": parts[1],
-            "expiry": parts[2],
-            "strike": parts[3].removeprefix("K="),
-        }
-    if len(parts) >= 6 and (parts[0] == "abs_spread" or parts[3] in {"CALL", "PUT"}):
-        first_strike, second_strike = _extract_spread_strikes(parts[4], parts[5])
-        return {
-            "strategy": parts[0],
-            "strategy_type": "abs_spread",
-            "underlying": parts[1],
-            "expiry": parts[2],
-            "option_class": parts[3],
-            "first_strike": first_strike,
-            "second_strike": second_strike,
-        }
-    return {}
-
-
-def _extract_spread_strikes(first_symbol: str, second_symbol: str) -> tuple[str, str]:
-    return _symbol_tail_number(first_symbol), _symbol_tail_number(second_symbol)
-
-
-def _symbol_tail_number(symbol: str) -> str:
-    tail = ""
-    for character in reversed(symbol):
-        if not character.isdigit() and character != ".":
-            break
-        tail = character + tail
-    return tail
-
-
-def _format_number(value: float) -> str:
-    return f"{value:.8f}".rstrip("0").rstrip(".")
-
-
-def _format_range(min_value: float, max_value: float) -> str:
-    return f"({_format_bound(min_value)}, {_format_bound(max_value)})"
-
-
-def _format_bound(value: float) -> str:
-    if math.isinf(value):
-        return "inf" if value > 0 else "-inf"
-    return _format_number(value)
+    return strategy_type_display_name(strategy_name)
 
 
 _TH_STYLE = (

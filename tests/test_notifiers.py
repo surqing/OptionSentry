@@ -18,11 +18,51 @@ from optionsentry.notifiers import (
     JsonlAlertRecorder,
     NoOpNotifier,
     NotificationError,
+    _email_row,
+    _event_payload,
     build_notifier,
 )
 
 
 class NotifierTests(unittest.TestCase):
+    def test_structured_strategy_fields_render_without_parsing_key(self) -> None:
+        structured = _event(
+            key="opaque-key",
+            strategy_name="CP组合预警",
+            strategy_type="cp_combo",
+            fields={
+                "underlying": "SHFE.AU2608",
+                "expiry": "2026-8",
+                "strike": "600",
+                "call_symbol": "SHFE.AU2608C600",
+                "put_symbol": "SHFE.AU2608P600",
+            },
+            value=-0.03559322,
+            max_value=0.01,
+            symbols=("SHFE.AU2608C600", "SHFE.AU2608P600", "SHFE.AU2608"),
+        )
+
+        row = _email_row(structured)
+
+        self.assertEqual(row.monitor, "SHFE.AU2608 2026-8")
+        self.assertEqual(row.structure, "认购 + 认沽 + 标的")
+        self.assertEqual(row.strike, "K=600")
+        self.assertEqual(row.trigger_condition, "偏离率在预警范围内（(-inf, 0.01)）")
+        self.assertEqual(
+            set(_event_payload(structured)),
+            {
+                "timestamp",
+                "strategy",
+                "key",
+                "value",
+                "min_value",
+                "max_value",
+                "symbols",
+                "message",
+                "metadata",
+            },
+        )
+
     def test_email_batches_alerts_by_configured_interval(self) -> None:
         email = EmailNotifier(
             EmailConfig(
@@ -339,6 +379,8 @@ def _event(
     max_value: float = 0.1,
     symbols: tuple[str, ...] = ("A", "B"),
     message: str = "message",
+    strategy_type: str = "",
+    fields: dict[str, str] | None = None,
 ) -> AlertEvent:
     return AlertEvent(
         timestamp=timestamp,
@@ -351,6 +393,8 @@ def _event(
             max_value=max_value,
             symbols=symbols,
             message=message,
+            strategy_type=strategy_type,
+            fields=fields or {},
         ),
     )
 

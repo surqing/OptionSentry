@@ -199,10 +199,13 @@ class ConditionEvaluation:
     symbols: tuple[str, ...]
     message: str
     metrics: dict[str, float] = field(default_factory=dict)
+    strategy_type: str = ""
+    fields: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbols", normalize_symbols(self.symbols))
         object.__setattr__(self, "metrics", dict(self.metrics))
+        object.__setattr__(self, "fields", dict(self.fields))
 
 
 @dataclass(frozen=True)
