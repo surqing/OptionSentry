@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from optionsentry.config import ConfigError
-from optionsentry.strategy_filters import apply_strategy_filter
+from optionsentry.strategy_filters import apply_strategy_filter, validate_strategy_filters
 from optionsentry.strategies import CPComboStrategy
 from tests.helpers import sample_universe
 
@@ -117,6 +117,25 @@ class StrategyFilterTests(unittest.TestCase):
             script.write_text("raise RuntimeError('import boom')\n", encoding="utf-8")
             with self.assertRaisesRegex(ConfigError, "import failed"):
                 apply_strategy_filter(strategy, sample_universe(), config_dir, _logger())
+
+    def test_validation_rejects_invalid_filter_before_universe_is_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            script = config_dir / "bad.py"
+            strategy = CPComboStrategy(
+                min_value=0.01,
+                max_value=float("inf"),
+                name="bad",
+                filter_script="bad.py",
+            )
+
+            script.write_text("def accept(option):\n    return True\n", encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "must accept \\(option, ctx\\)"):
+                validate_strategy_filters((strategy,), config_dir)
+
+            script.write_text("def accept(:\n", encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "import failed"):
+                validate_strategy_filters((strategy,), config_dir)
 
 
 class CapturingLogHandler(logging.Handler):

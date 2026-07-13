@@ -58,6 +58,7 @@ from optionsentry.gui.credentials import CredentialResolution, load_and_validate
 from optionsentry.gui.runner_adapter import GuiRunSignals, build_gui_runner
 from optionsentry.models import AlertEvent, ConditionEvaluation, Universe
 from optionsentry.runner import RunnerCycle
+from optionsentry.strategy_filters import validate_strategy_filters
 from optionsentry.strategies import (
     CALL_MONEYNESS_METRIC,
     PUT_MONEYNESS_METRIC,
@@ -653,6 +654,10 @@ class MainWindow(QMainWindow):
             return
         try:
             monitor_config = self._config_with_active_refresh(self.config_editor.build_config())
+            validate_strategy_filters(
+                monitor_config.selected_strategies,
+                self.config_path.resolve().parent,
+            )
         except Exception as exc:
             QMessageBox.warning(self, "配置错误", str(exc))
             return

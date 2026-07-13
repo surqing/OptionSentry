@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterator
 
 from optionsentry.alerts import AlertEngine
+from optionsentry.config import ConfigError
 from optionsentry.models import AlertEvent, MarketSnapshot, Universe
 from optionsentry.runner import AlertRunner, RunnerCallbacks
 from optionsentry.strategies import CPComboStrategy
@@ -21,8 +22,10 @@ class FakeDataSource:
     closed: bool = False
     stream_universe: Universe | None = None
     stream_calls: int = 0
+    discover_calls: int = 0
 
     def discover_universe(self) -> Universe:
+        self.discover_calls += 1
         return self.universe
 
     def stream(self, universe: Universe) -> Iterator[MarketSnapshot]:
@@ -72,6 +75,30 @@ class CapturingLogHandler(logging.Handler):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_runner_validates_filter_scripts_before_discovery(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_source = FakeDataSource(sample_universe(), ())
+            runner = AlertRunner(
+                data_source=data_source,
+                strategies=(
+                    CPComboStrategy(
+                        min_value=0.01,
+                        max_value=float("inf"),
+                        filter_script="missing.py",
+                    ),
+                ),
+                alert_engine=AlertEngine(),
+                notifier=CapturingNotifier([]),
+                logger=_logger("tests.runner.filter_validation"),
+                config_dir=tmpdir,
+            )
+
+            with self.assertRaisesRegex(ConfigError, "script not found"):
+                runner.run()
+
+            self.assertEqual(data_source.discover_calls, 0)
+            self.assertTrue(data_source.closed)
+
     def test_runner_closes_data_source_when_universe_is_empty(self) -> None:
         data_source = FakeDataSource(Universe(instruments={}), ())
         logger = logging.getLogger("tests.runner.empty")

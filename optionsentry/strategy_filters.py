@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Callable
+from typing import Callable, Iterable
 
 from optionsentry.config import ConfigError
 from optionsentry.models import InstrumentMeta, Universe
@@ -23,6 +24,39 @@ class FilterContext:
         if meta is not None and meta.is_future:
             return meta
         return None
+
+
+@dataclass(frozen=True)
+class LoadedStrategyFilter:
+    script_path: Path
+    function_name: str
+    accept: Callable[[InstrumentMeta, FilterContext], bool]
+
+
+def validate_strategy_filters(strategies: Iterable[Strategy], config_dir: str | Path) -> None:
+    """Validate configured filter scripts before market-data discovery begins."""
+    for strategy in strategies:
+        load_strategy_filter(strategy, config_dir)
+
+
+def load_strategy_filter(
+    strategy: Strategy,
+    config_dir: str | Path,
+) -> LoadedStrategyFilter | None:
+    script = getattr(strategy, "filter_script", None)
+    if not script:
+        return None
+    scope = getattr(strategy, "filter_scope", "options")
+    if scope != "options":
+        raise ConfigError(f"Strategy filter_scope must be 'options': {strategy.name}")
+    script_path = _resolve_script_path(script, config_dir)
+    function_name = getattr(strategy, "filter_function", "accept") or "accept"
+    accept = _load_filter_function(script_path, function_name, strategy.name)
+    return LoadedStrategyFilter(
+        script_path=script_path,
+        function_name=function_name,
+        accept=accept,
+    )
 
 
 def apply_strategy_filter(
@@ -46,12 +80,12 @@ def apply_strategy_filter(
             len(universe.price_symbols()),
         )
         return universe
+    loaded_filter = load_strategy_filter(strategy, config_dir)
+    assert loaded_filter is not None
     scope = getattr(strategy, "filter_scope", "options")
-    if scope != "options":
-        raise ConfigError(f"Strategy filter_scope must be 'options': {strategy.name}")
-    script_path = _resolve_script_path(script, config_dir)
-    function_name = getattr(strategy, "filter_function", "accept") or "accept"
-    accept = _load_filter_function(script_path, function_name, strategy.name)
+    script_path = loaded_filter.script_path
+    function_name = loaded_filter.function_name
+    accept = loaded_filter.accept
     ctx = FilterContext(universe=universe)
     kept_options: list[InstrumentMeta] = []
     missing_underlyings: set[str] = set()
@@ -131,7 +165,27 @@ def _load_filter_function(script_path: Path, function_name: str, strategy_name: 
         raise ConfigError(f"Strategy filter function not found: {function_name} in {script_path}")
     if not callable(accept):
         raise ConfigError(f"Strategy filter function is not callable: {function_name} in {script_path}")
+    _validate_filter_signature(accept, function_name, script_path)
     return accept
+
+
+def _validate_filter_signature(
+    accept: Callable[[InstrumentMeta, FilterContext], bool],
+    function_name: str,
+    script_path: Path,
+) -> None:
+    try:
+        signature = inspect.signature(accept)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(
+            f"Unable to inspect strategy filter function: {function_name} in {script_path}"
+        ) from exc
+    try:
+        signature.bind(object(), object())
+    except TypeError as exc:
+        raise ConfigError(
+            f"Strategy filter function must accept (option, ctx): {function_name} in {script_path}"
+        ) from exc
 
 
 def _load_module(script_path: Path, strategy_name: str) -> ModuleType:

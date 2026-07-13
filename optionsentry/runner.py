@@ -11,7 +11,7 @@ from optionsentry.data_sources.base import MarketDataSource
 from optionsentry.models import AlertEvent, ConditionEvaluation, Universe
 from optionsentry.notifiers import Notifier
 from optionsentry.strategies import CompiledStrategy, Strategy
-from optionsentry.strategy_filters import apply_strategy_filter
+from optionsentry.strategy_filters import apply_strategy_filter, validate_strategy_filters
 
 
 @dataclass(frozen=True)
@@ -58,6 +58,7 @@ class AlertRunner:
         summary_compute_ms = 0.0
         last_summary_at = 0.0
         try:
+            validate_strategy_filters(self.strategies, self.config_dir)
             self._emit_status("discovering")
             universe = self.data_source.discover_universe()
             if not universe.options:
