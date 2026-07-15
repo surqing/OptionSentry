@@ -1610,7 +1610,7 @@ class ConfigEditor(QWidget):
         self.strategies = QTableWidget(0, 6)
         self.strategies.setHorizontalHeaderLabels(("启用", "ID", "类型", "名称", "参数", "筛选脚本"))
         self.strategies.setAlternatingRowColors(True)
-        self.strategies.setMinimumHeight(180)
+        self.strategies.setMinimumHeight(360)
         self.strategies.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.strategies.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.strategies.verticalHeader().setDefaultSectionSize(36)

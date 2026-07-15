@@ -153,7 +153,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(notifier_config.popup.duration_seconds, 5)
         self.assertEqual(notifier_config.sound.duration_seconds, 7)
         self.assertEqual(main_window.config_editor.strategies.columnCount(), 6)
-        self.assertGreaterEqual(main_window.config_editor.strategies.minimumHeight(), 180)
+        self.assertGreaterEqual(main_window.config_editor.strategies.minimumHeight(), 360)
         self.assertEqual(
             main_window.config_editor.strategies.item(0, 0).checkState(),
             Qt.CheckState.Checked,
