@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, replace
 from datetime import datetime
 import math
@@ -7,6 +8,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from threading import Lock
 from typing import Any, Iterable, Mapping
 
 from PyQt6.QtCore import QEasingCurve, QObject, QPropertyAnimation, QRect, QTimer, Qt, QThread, pyqtSignal
@@ -88,9 +90,19 @@ SORT_LABEL_PROPERTY = "optionsentry_sort_label"
 SORT_ORDER_PROPERTY = "optionsentry_sort_order"
 FILTERS_PROPERTY = "optionsentry_filters"
 SORT_ROLE = Qt.ItemDataRole.UserRole
+RECORD_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 TOAST_DURATION_MS = 1500
 TOAST_FADE_MS = 150
 ALERT_SOUND_BEEP_INTERVAL_MS = 700
+MONITOR_UI_POLL_INTERVAL_MS = 100
+GUI_LOG_DRAIN_BATCH_SIZE = 200
+GUI_LOG_MAX_PENDING_MESSAGES = 2000
+GUI_LOG_MAX_BLOCKS = 5000
+GUI_ALERT_DRAIN_BATCH_SIZE = 200
+GUI_ALERT_MAX_PENDING_EVENTS = 2000
+GUI_ALERT_MAX_RECORDS = 1000
+
+
 def app_icon() -> QIcon:
     return QIcon(str(APP_ICON_PATH))
 
@@ -316,11 +328,8 @@ def _remember_tqsdk_credentials(
 
 class MonitorWorker(QObject):
     status = pyqtSignal(str)
-    log = pyqtSignal(str)
     universe = pyqtSignal(object)
     compiled = pyqtSignal(int, int)
-    cycle = pyqtSignal(object)
-    alert = pyqtSignal(object)
     failed = pyqtSignal(str)
     finished = pyqtSignal(int)
 
@@ -330,6 +339,12 @@ class MonitorWorker(QObject):
         self.config_path = config_path
         self._context = None
         self._stop_before_start = False
+        self._updates_lock = Lock()
+        self._latest_cycle: RunnerCycle | None = None
+        self._pending_logs: deque[str] = deque()
+        self._dropped_log_count = 0
+        self._pending_alerts: deque[AlertEvent] = deque()
+        self._dropped_alert_count = 0
 
     def run(self) -> None:
         try:
@@ -337,11 +352,11 @@ class MonitorWorker(QObject):
                 self.config,
                 GuiRunSignals(
                     on_status=self.status.emit,
-                    on_log=self.log.emit,
+                    on_log=self._buffer_log,
                     on_universe=self.universe.emit,
                     on_compiled=self.compiled.emit,
-                    on_cycle=self.cycle.emit,
-                    on_alert=self.alert.emit,
+                    on_cycle=self._store_latest_cycle,
+                    on_alert=self._buffer_alert,
                 ),
                 self.config_path,
             )
@@ -362,6 +377,42 @@ class MonitorWorker(QObject):
         self._stop_before_start = True
         if self._context is not None:
             self._context.stop()
+
+    def _store_latest_cycle(self, cycle: RunnerCycle) -> None:
+        with self._updates_lock:
+            self._latest_cycle = cycle
+
+    def _buffer_log(self, message: str) -> None:
+        with self._updates_lock:
+            if len(self._pending_logs) >= GUI_LOG_MAX_PENDING_MESSAGES:
+                self._pending_logs.popleft()
+                self._dropped_log_count += 1
+            self._pending_logs.append(message)
+
+    def _buffer_alert(self, event: AlertEvent) -> None:
+        with self._updates_lock:
+            if len(self._pending_alerts) >= GUI_ALERT_MAX_PENDING_EVENTS:
+                self._pending_alerts.popleft()
+                self._dropped_alert_count += 1
+            self._pending_alerts.append(event)
+
+    def take_pending_updates(
+        self,
+        log_limit: int = GUI_LOG_DRAIN_BATCH_SIZE,
+        alert_limit: int = GUI_ALERT_DRAIN_BATCH_SIZE,
+    ) -> tuple[RunnerCycle | None, tuple[str, ...], int, tuple[AlertEvent, ...], int]:
+        with self._updates_lock:
+            cycle = self._latest_cycle
+            self._latest_cycle = None
+            log_count = min(max(log_limit, 0), len(self._pending_logs))
+            logs = tuple(self._pending_logs.popleft() for _ in range(log_count))
+            dropped_log_count = self._dropped_log_count
+            self._dropped_log_count = 0
+            alert_count = min(max(alert_limit, 0), len(self._pending_alerts))
+            alerts = tuple(self._pending_alerts.popleft() for _ in range(alert_count))
+            dropped_alert_count = self._dropped_alert_count
+            self._dropped_alert_count = 0
+        return cycle, logs, dropped_log_count, alerts, dropped_alert_count
 
 
 class LoginWindow(QWidget):
@@ -528,6 +579,9 @@ class MainWindow(QMainWindow):
         self._alert_sound_until = 0.0
         self._alert_sound_timer = QTimer(self)
         self._alert_sound_timer.timeout.connect(self._on_alert_sound_timer)
+        self._monitor_ui_timer = QTimer(self)
+        self._monitor_ui_timer.setInterval(MONITOR_UI_POLL_INTERVAL_MS)
+        self._monitor_ui_timer.timeout.connect(self._drain_monitor_updates)
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon())
         self.resize(1180, 760)
@@ -621,7 +675,7 @@ class MainWindow(QMainWindow):
     def _alerts_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        self.alert_view = StrategyEvaluationTable("预警记录")
+        self.alert_view = StrategyEvaluationTable("预警记录", max_records=GUI_ALERT_MAX_RECORDS)
         self.alert_table = self.alert_view.table
         layout.addWidget(self.alert_view)
         return tab
@@ -632,6 +686,7 @@ class MainWindow(QMainWindow):
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self.log_view.document().setMaximumBlockCount(GUI_LOG_MAX_BLOCKS)
         layout.addWidget(self.log_view)
         return tab
 
@@ -672,16 +727,14 @@ class MainWindow(QMainWindow):
         self._monitor_worker.moveToThread(self._monitor_thread)
         self._monitor_thread.started.connect(self._monitor_worker.run)
         self._monitor_worker.status.connect(lambda status: self._set_status("status", status))
-        self._monitor_worker.log.connect(self._append_log)
         self._monitor_worker.universe.connect(self._on_universe)
         self._monitor_worker.compiled.connect(self._on_compiled)
-        self._monitor_worker.cycle.connect(self._on_cycle)
-        self._monitor_worker.alert.connect(self._on_alert)
         self._monitor_worker.failed.connect(self._on_monitor_failed)
         self._monitor_worker.finished.connect(self._on_monitor_finished)
         self._monitor_worker.finished.connect(self._monitor_thread.quit)
         self._monitor_thread.finished.connect(self._monitor_worker.deleteLater)
         self._monitor_thread.finished.connect(self._monitor_thread.deleteLater)
+        self._monitor_ui_timer.start()
         self._monitor_thread.start()
 
     def _stop_monitor(self) -> None:
@@ -692,6 +745,8 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(False)
 
     def _on_monitor_finished(self, alert_count: int) -> None:
+        self._drain_monitor_updates(drain_all=True)
+        self._monitor_ui_timer.stop()
         self._append_log(f"Monitor stopped, alerts={alert_count}")
         self._monitor_worker = None
         self._monitor_thread = None
@@ -713,6 +768,31 @@ class MainWindow(QMainWindow):
         self._set_status("strategies", str(strategy_count))
         self._set_status("conditions", str(total_conditions))
 
+    def _drain_monitor_updates(self, drain_all: bool = False) -> None:
+        worker = self._monitor_worker
+        if worker is None:
+            return
+        log_limit = GUI_LOG_MAX_PENDING_MESSAGES if drain_all else GUI_LOG_DRAIN_BATCH_SIZE
+        alert_limit = GUI_ALERT_MAX_PENDING_EVENTS if drain_all else GUI_ALERT_DRAIN_BATCH_SIZE
+        cycle, logs, dropped_log_count, alerts, dropped_alert_count = worker.take_pending_updates(
+            log_limit=log_limit,
+            alert_limit=alert_limit,
+        )
+        if dropped_log_count:
+            self._append_log(
+                f"[GUI] 日志显示队列已满，跳过 {dropped_log_count} 条旧日志；完整日志仍保存在日志文件中。"
+            )
+        if logs:
+            self._append_log("\n".join(logs))
+        if dropped_alert_count:
+            self._append_log(
+                f"[GUI] 预警显示队列已满，跳过 {dropped_alert_count} 条旧记录；通知渠道和预警日志不受影响。"
+            )
+        if alerts:
+            self._on_alerts(alerts)
+        if cycle is not None:
+            self._on_cycle(cycle)
+
     def _on_cycle(self, cycle: RunnerCycle) -> None:
         self._set_status("active", str(cycle.active_count))
         self._set_status("alerts", str(cycle.total_alerts))
@@ -724,9 +804,18 @@ class MainWindow(QMainWindow):
             self._refresh_active_table_from_cache()
 
     def _on_alert(self, event: AlertEvent) -> None:
+        self._on_alerts((event,))
+
+    def _on_alerts(self, events: Iterable[AlertEvent]) -> None:
+        events = tuple(events)
+        if not events:
+            return
         follow_latest = _table_is_at_bottom(self.alert_table)
-        self.alert_view.append_record(event.timestamp, event.evaluation, scroll_to_bottom=follow_latest)
-        self._emit_local_alert(event)
+        self.alert_view.append_records(
+            (_EvaluationRecord(event.timestamp, event.evaluation) for event in events),
+            scroll_to_bottom=follow_latest,
+        )
+        self._emit_local_alert(events[-1])
 
     def _emit_local_alert(self, event: AlertEvent) -> None:
         config = self._monitor_config or self.config
@@ -997,9 +1086,15 @@ class SortableTableWidgetItem(QTableWidgetItem):
 
 
 class StrategyEvaluationTable(QGroupBox):
-    def __init__(self, title: str, show_moneyness_columns: bool = False) -> None:
+    def __init__(
+        self,
+        title: str,
+        show_moneyness_columns: bool = False,
+        max_records: int | None = None,
+    ) -> None:
         super().__init__(title)
         self._show_moneyness_columns = show_moneyness_columns
+        self._max_records = max_records
         self._configured_strategy_names: tuple[str, ...] = ()
         self._strategy_names: tuple[str, ...] = ()
         self._selected_strategy: str | None = None
@@ -1058,6 +1153,7 @@ class StrategyEvaluationTable(QGroupBox):
 
     def set_records(self, records: Iterable[_EvaluationRecord]) -> None:
         self._records = list(records)
+        self._trim_records()
         self._sync_strategy_buttons()
         self._render()
 
@@ -1067,9 +1163,73 @@ class StrategyEvaluationTable(QGroupBox):
         evaluation: ConditionEvaluation,
         scroll_to_bottom: bool = True,
     ) -> None:
-        self._records.append(_EvaluationRecord(timestamp, evaluation))
+        self.append_records(
+            (_EvaluationRecord(timestamp, evaluation),),
+            scroll_to_bottom=scroll_to_bottom,
+        )
+
+    def append_records(
+        self,
+        records: Iterable[_EvaluationRecord],
+        scroll_to_bottom: bool = True,
+    ) -> None:
+        new_records = list(records)
+        if not new_records:
+            return
+        self._records.extend(new_records)
+        removed_records = self._trim_records()
         self._sync_strategy_buttons()
-        self._render(scroll_to_bottom=scroll_to_bottom, preserve_scroll=not scroll_to_bottom)
+        include_strategy = self._selected_strategy is None
+        visible_records = [
+            record
+            for record in self._records
+            if include_strategy or record.evaluation.strategy_name == self._selected_strategy
+        ]
+        metric_columns = self._metric_columns(visible_records, include_strategy)
+        if self._table_shape != (include_strategy, metric_columns):
+            self._render(scroll_to_bottom=scroll_to_bottom, preserve_scroll=not scroll_to_bottom)
+            return
+
+        vertical_scroll = self.table.verticalScrollBar()
+        horizontal_scroll = self.table.horizontalScrollBar()
+        previous_vertical = vertical_scroll.value() if not scroll_to_bottom else 0
+        previous_horizontal = horizontal_scroll.value() if not scroll_to_bottom else 0
+        retained_record_ids = {id(record) for record in self._records}
+        self.table.setUpdatesEnabled(False)
+        try:
+            self._remove_rows_for_records(removed_records)
+            for record in new_records:
+                if id(record) not in retained_record_ids:
+                    continue
+                if not include_strategy and record.evaluation.strategy_name != self._selected_strategy:
+                    continue
+                self._append_row(record, include_strategy, metric_columns)
+            _restore_table_sort(self.table)
+            _apply_table_filters(self.table)
+        finally:
+            self.table.setUpdatesEnabled(True)
+        if scroll_to_bottom:
+            self.table.scrollToBottom()
+        else:
+            vertical_scroll.setValue(min(previous_vertical, vertical_scroll.maximum()))
+            horizontal_scroll.setValue(min(previous_horizontal, horizontal_scroll.maximum()))
+
+    def _trim_records(self) -> tuple[_EvaluationRecord, ...]:
+        if self._max_records is None or len(self._records) <= self._max_records:
+            return ()
+        excess = len(self._records) - self._max_records
+        removed_records = tuple(self._records[:excess])
+        del self._records[:excess]
+        return removed_records
+
+    def _remove_rows_for_records(self, records: Iterable[_EvaluationRecord]) -> None:
+        record_ids = {id(record) for record in records}
+        if not record_ids:
+            return
+        for row in range(self.table.rowCount() - 1, -1, -1):
+            item = self.table.item(row, 0)
+            if item is not None and item.data(RECORD_ROLE) in record_ids:
+                self.table.removeRow(row)
 
     def _sync_strategy_buttons(self) -> None:
         record_strategy_names = (record.evaluation.strategy_name for record in self._records)
@@ -1216,6 +1376,8 @@ class StrategyEvaluationTable(QGroupBox):
         )
         for column, (value, sort_key) in enumerate(values):
             item = _table_item(value, sort_key=sort_key)
+            if column == 0:
+                item.setData(RECORD_ROLE, id(record))
             if background is not None:
                 item.setBackground(background)
             if _right_align_sort_key(sort_key):
