@@ -11,6 +11,7 @@ from typing import Any, Callable, Iterator
 
 from optionsentry.config import AppConfig, ConfigError
 from optionsentry.models import CategoryMeta, InstrumentMeta, MarketSnapshot, Universe
+from optionsentry.monitor_state import MonitorState
 from optionsentry.symbols import normalize_symbol, tqsdk_api_symbol
 
 
@@ -24,6 +25,7 @@ class TqSdkDataSource:
     config: AppConfig
     logger: logging.Logger
     stop_requested: Callable[[], bool] | None = None
+    status_callback: Callable[[str], None] | None = None
     _live_api: Any | None = field(default=None, init=False, repr=False)
 
     @property
@@ -332,8 +334,10 @@ class TqSdkDataSource:
         _validate_live_subscription_size(symbols)
         api = self._consume_live_api() or self._create_api()
         try:
+            self._emit_status(MonitorState.SUBSCRIBING)
             quotes = self._subscribe_live_quotes(api, symbols, _api_symbols_by_internal_symbol(universe))
             self.logger.info("Subscribed live quotes: %s", len(quotes))
+            self._emit_status(MonitorState.WAITING_DATA)
             if self.logger.isEnabledFor(logging.DEBUG):
                 self.logger.debug(
                     "Final live quote subscription symbols (%s): %s",
@@ -435,9 +439,11 @@ class TqSdkDataSource:
 
         api = self._create_api()
         try:
+            self._emit_status(MonitorState.SUBSCRIBING)
             serials = self._create_backtest_serials(api, symbols, _api_symbols_by_internal_symbol(universe))
             symbols = [symbol for symbol in symbols if symbol in serials]
             self.logger.info("Subscribed backtest K-lines: %s", len(serials))
+            self._emit_status(MonitorState.WAITING_DATA)
             if self.logger.isEnabledFor(logging.DEBUG):
                 self.logger.debug(
                     "Final backtest K-line subscription symbols (%s): %s",
@@ -716,6 +722,11 @@ class TqSdkDataSource:
 
     def _should_stop(self) -> bool:
         return bool(self.stop_requested and self.stop_requested())
+
+    def _emit_status(self, status: MonitorState | str) -> None:
+        callback = getattr(self, "status_callback", None)
+        if callback is not None:
+            callback(MonitorState(status).value)
 
 
 def _row_to_meta(row: Any, fallback_symbol: str) -> InstrumentMeta:

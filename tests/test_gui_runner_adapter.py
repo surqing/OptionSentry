@@ -73,8 +73,10 @@ class GuiRunnerAdapterTests(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         self.assertEqual(len(cycles), 1)
         self.assertEqual(compiled[0][0], 1)
-        self.assertIn("discovering", statuses)
-        self.assertEqual(statuses[-1], "stopped")
+        self.assertEqual(
+            statuses,
+            ["discovering", "compiling", "running", "stopped"],
+        )
 
     def test_runner_stop_callback_breaks_after_cycle(self) -> None:
         universe = sample_universe()

@@ -250,6 +250,7 @@ class RunnerTests(unittest.TestCase):
     def test_runner_validates_filter_scripts_before_discovery(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             data_source = FakeDataSource(sample_universe(), ())
+            statuses: list[str] = []
             runner = AlertRunner(
                 data_source=data_source,
                 strategies=(
@@ -263,6 +264,7 @@ class RunnerTests(unittest.TestCase):
                 notifier=CapturingNotifier([]),
                 logger=_logger("tests.runner.filter_validation"),
                 config_dir=tmpdir,
+                callbacks=RunnerCallbacks(on_status=statuses.append),
             )
 
             with self.assertRaisesRegex(ConfigError, "script not found"):
@@ -270,9 +272,11 @@ class RunnerTests(unittest.TestCase):
 
             self.assertEqual(data_source.discover_calls, 0)
             self.assertTrue(data_source.closed)
+            self.assertEqual(statuses, ["failed"])
 
     def test_runner_closes_data_source_when_universe_is_empty(self) -> None:
         data_source = FakeDataSource(Universe(instruments={}), ())
+        statuses: list[str] = []
         logger = logging.getLogger("tests.runner.empty")
         logger.handlers = [logging.NullHandler()]
         logger.propagate = False
@@ -282,12 +286,44 @@ class RunnerTests(unittest.TestCase):
             alert_engine=AlertEngine(),
             notifier=CapturingNotifier([]),
             logger=logger,
+            callbacks=RunnerCallbacks(on_status=statuses.append),
         )
 
         alert_count = runner.run()
 
         self.assertEqual(alert_count, 0)
         self.assertTrue(data_source.closed)
+        self.assertEqual(statuses, ["discovering", "empty_universe"])
+
+    def test_runner_preserves_stopped_state_when_stop_interrupts_stream(self) -> None:
+        universe = sample_universe()
+        stop_requested = False
+        statuses: list[str] = []
+
+        @dataclass
+        class InterruptedDataSource(FakeDataSource):
+            def stream(self, universe: Universe) -> Iterator[MarketSnapshot]:
+                nonlocal stop_requested
+                stop_requested = True
+                raise RuntimeError("stream closed during stop")
+                yield
+
+        data_source = InterruptedDataSource(universe, ())
+        runner = AlertRunner(
+            data_source=data_source,
+            strategies=(CPComboStrategy(min_value=0.01, max_value=float("inf")),),
+            alert_engine=AlertEngine(),
+            notifier=CapturingNotifier([]),
+            logger=_logger("tests.runner.interrupted_stop"),
+            stop_requested=lambda: stop_requested,
+            callbacks=RunnerCallbacks(on_status=statuses.append),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "stream closed during stop"):
+            runner.run()
+
+        self.assertTrue(data_source.closed)
+        self.assertEqual(statuses[-1], "stopped")
 
     def test_runner_generates_crossing_alerts_from_fake_source(self) -> None:
         universe = sample_universe()
@@ -577,7 +613,7 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(alert_count, 0)
             self.assertEqual(data_source.stream_calls, 0)
             self.assertEqual(compiled, [(0, 0)])
-            self.assertIn("empty_conditions", statuses)
+            self.assertEqual(statuses[-1], "empty_conditions")
 
 
 def _logger(name: str) -> logging.Logger:

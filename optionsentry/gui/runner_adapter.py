@@ -55,6 +55,7 @@ def build_gui_runner(config: AppConfig, signals: GuiRunSignals, config_path: str
         config=config,
         logger=logger,
         stop_requested=stop_event.is_set,
+        status_callback=signals.on_status,
     )
     runner = AlertRunner(
         data_source=data_source,

@@ -131,6 +131,27 @@ class IncrementalStrategyTests(unittest.TestCase):
 
 
 class LivePriceCacheTests(unittest.TestCase):
+    def test_live_stream_reports_subscribing_then_waiting_without_market_data(self) -> None:
+        api = _FakeApi(events=())
+        data_source = _FakeLiveDataSource(api)
+        statuses: list[str] = []
+        stop_requested = False
+
+        def on_status(status: str) -> None:
+            nonlocal stop_requested
+            statuses.append(status)
+            if status == "waiting_data":
+                stop_requested = True
+
+        data_source.status_callback = on_status
+        data_source.stop_requested = lambda: stop_requested
+
+        with self.assertRaises(StopIteration):
+            next(data_source._stream_live(_one_strike_universe()))
+
+        self.assertEqual(statuses, ["subscribing", "waiting_data"])
+        self.assertTrue(api.closed)
+
     def test_live_discovery_api_is_reused_for_quote_stream(self) -> None:
         api = _FakeApi(
             events=(

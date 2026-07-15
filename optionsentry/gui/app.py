@@ -62,6 +62,12 @@ from optionsentry.gui.config_store import data_to_config, save_config
 from optionsentry.gui.credentials import CredentialResolution, load_and_validate_login
 from optionsentry.gui.runner_adapter import GuiRunSignals, build_gui_runner
 from optionsentry.models import AlertEvent, ConditionEvaluation, Universe
+from optionsentry.monitor_state import (
+    InvalidMonitorStateTransition,
+    MonitorState,
+    MonitorStateMachine,
+    monitor_state_label,
+)
 from optionsentry.runner import RunnerCycle
 from optionsentry.strategy_base import MetricColumn, StrategyParameterSpec
 from optionsentry.strategy_filters import validate_strategy_filters
@@ -487,7 +493,10 @@ class MonitorWorker(QObject):
                 self._context.stop()
             alert_count = self._context.runner.run()
         except Exception as exc:
-            if "stopped by user" not in str(exc).lower():
+            stop_requested = self._stop_before_start or bool(
+                self._context is not None and self._context.stop_event.is_set()
+            )
+            if not stop_requested and "stopped by user" not in str(exc).lower():
                 self.failed.emit(f"{type(exc).__name__}: {exc}")
             alert_count = -1
         finally:
@@ -668,6 +677,7 @@ class MainWindow(QMainWindow):
         self._monitor_worker: MonitorWorker | None = None
         self._monitor_config: AppConfig | None = None
         self._running = False
+        self._monitor_state_machine = MonitorStateMachine()
         self._active_records_by_key: dict[str, _EvaluationRecord] = {}
         self._latest_active_cycle_count = 0
         self._last_displayed_active_cycle_count = 0
@@ -691,6 +701,7 @@ class MainWindow(QMainWindow):
         self._toast = ToastPopup(self)
         self._load_config_into_editor(config)
         self._set_running(False)
+        self._render_monitor_state()
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -829,18 +840,20 @@ class MainWindow(QMainWindow):
         self._reset_active_records()
         self.active_view.clear_records()
         self._append_log("Starting monitor")
+        self._transition_monitor_state(MonitorState.STARTING)
         self._set_running(True)
         self._monitor_thread = QThread(self)
         self._monitor_worker = MonitorWorker(monitor_config, self.config_path)
         self._monitor_worker.moveToThread(self._monitor_thread)
         self._monitor_thread.started.connect(self._monitor_worker.run)
-        self._monitor_worker.status.connect(lambda status: self._set_status("status", status))
+        self._monitor_worker.status.connect(self._on_monitor_status)
         self._monitor_worker.universe.connect(self._on_universe)
         self._monitor_worker.compiled.connect(self._on_compiled)
         self._monitor_worker.failed.connect(self._on_monitor_failed)
         self._monitor_worker.finished.connect(self._on_monitor_finished)
         self._monitor_worker.finished.connect(self._monitor_thread.quit)
-        self._monitor_thread.finished.connect(self._monitor_worker.deleteLater)
+        self._monitor_worker.finished.connect(self._monitor_worker.deleteLater)
+        self._monitor_thread.finished.connect(self._on_monitor_thread_finished)
         self._monitor_thread.finished.connect(self._monitor_thread.deleteLater)
         self._monitor_ui_timer.start()
         self._monitor_thread.start()
@@ -848,24 +861,40 @@ class MainWindow(QMainWindow):
     def _stop_monitor(self) -> None:
         self._cancel_active_manual_refresh()
         if self._monitor_worker is not None:
-            self._set_status("status", "stopping")
+            self._transition_monitor_state(MonitorState.STOPPING)
             self._monitor_worker.stop()
         self.stop_button.setEnabled(False)
 
     def _on_monitor_finished(self, alert_count: int) -> None:
         self._drain_monitor_updates(drain_all=True)
         self._monitor_ui_timer.stop()
-        self._append_log(f"Monitor stopped, alerts={alert_count}")
+        if alert_count >= 0:
+            self._append_log(f"Monitor stopped, alerts={alert_count}")
+        else:
+            self._append_log("Monitor finished without a final alert count")
+        self._stop_alert_sound()
+        self._cancel_active_manual_refresh()
+
+    def _on_monitor_failed(self, message: str) -> None:
+        self._transition_monitor_state(MonitorState.FAILED)
+        self._append_log(message)
+        QMessageBox.critical(self, "监控失败", message)
+
+    def _on_monitor_thread_finished(self) -> None:
         self._monitor_worker = None
         self._monitor_thread = None
         self._monitor_config = None
-        self._stop_alert_sound()
-        self._cancel_active_manual_refresh()
         self._set_running(False)
+        if not self._monitor_state_machine.is_terminal:
+            self._transition_monitor_state(MonitorState.STOPPED)
 
-    def _on_monitor_failed(self, message: str) -> None:
-        self._append_log(message)
-        QMessageBox.critical(self, "监控失败", message)
+    def _on_monitor_status(self, status: str) -> None:
+        try:
+            state = MonitorState(status)
+        except ValueError:
+            self._append_log(f"[GUI] Ignored unknown monitor state: {status}")
+            return
+        self._transition_monitor_state(state)
 
     def _on_universe(self, universe: Universe) -> None:
         self._set_status("options", str(len(universe.options)))
@@ -1092,8 +1121,20 @@ class MainWindow(QMainWindow):
         self._running = running
         self.start_button.setEnabled(not running)
         self.stop_button.setEnabled(running)
-        if not running:
-            self._set_status("status", "stopped")
+
+    def _transition_monitor_state(self, state: MonitorState) -> None:
+        try:
+            self._monitor_state_machine.transition(state)
+        except InvalidMonitorStateTransition as exc:
+            self._append_log(f"[GUI] Ignored monitor state transition: {exc}")
+            return
+        self._render_monitor_state()
+
+    def _render_monitor_state(self) -> None:
+        self._set_status(
+            "status",
+            monitor_state_label(self._monitor_state_machine.state),
+        )
 
     def _set_status(self, key: str, value: str) -> None:
         label = self.status_labels.get(key)

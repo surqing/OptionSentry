@@ -10,6 +10,7 @@ from optionsentry.alerts import AlertEngine
 from optionsentry.config import ConfigError
 from optionsentry.data_sources.base import MarketDataSource
 from optionsentry.models import AlertEvent, ConditionEvaluation, Universe
+from optionsentry.monitor_state import MonitorState
 from optionsentry.notifiers import Notifier
 from optionsentry.strategies import CompiledStrategy, Strategy, StrategyCompilation
 from optionsentry.strategy_filters import apply_strategy_filter, validate_strategy_filters
@@ -52,6 +53,7 @@ class AlertRunner:
     def run(self) -> int:
         cycle_count = 0
         alert_count = 0
+        terminal_state = MonitorState.STOPPED
         summary_cycle_count = 0
         summary_alert_count = 0
         summary_evaluation_count = 0
@@ -60,15 +62,19 @@ class AlertRunner:
         last_summary_at = 0.0
         try:
             validate_strategy_filters(self.strategies, self.config_dir)
-            self._emit_status("discovering")
+            if self._should_stop():
+                return 0
+            self._emit_status(MonitorState.DISCOVERING)
             universe = self.data_source.discover_universe()
+            if self._should_stop():
+                return 0
             if not universe.options:
                 self.logger.warning("Universe has no futures options to evaluate.")
                 self._emit_universe(universe)
-                self._emit_status("empty_universe")
+                terminal_state = MonitorState.EMPTY_UNIVERSE
                 return 0
 
-            self._emit_status("compiling")
+            self._emit_status(MonitorState.COMPILING)
             compiled_strategies, stream_universe = self._compile_strategies(universe)
             total_conditions = sum(strategy.condition_count for strategy in compiled_strategies)
             compiled_strategy_count = len(
@@ -78,7 +84,7 @@ class AlertRunner:
             self._emit_compiled(compiled_strategy_count, total_conditions)
             if not compiled_strategies or total_conditions == 0:
                 self.logger.warning("No alert conditions after strategy filters and compilation.")
-                self._emit_status("empty_conditions")
+                terminal_state = MonitorState.EMPTY_CONDITIONS
                 return 0
             self.logger.info(
                 "Compiled alert strategies: strategies=%s units=%s total_conditions=%s",
@@ -92,8 +98,10 @@ class AlertRunner:
                 stream_universe,
             ):
                 if self._should_stop():
-                    self._emit_status("stopping")
+                    self._emit_status(MonitorState.STOPPING)
                     break
+                if first_snapshot:
+                    self._emit_status(MonitorState.RUNNING)
                 changed_symbols = None if first_snapshot else snapshot.changed_symbols
                 started_at = time.perf_counter()
                 evaluations = []
@@ -174,12 +182,24 @@ class AlertRunner:
                     )
                 )
                 if self._should_stop():
-                    self._emit_status("stopping")
+                    self._emit_status(MonitorState.STOPPING)
                     break
+        except Exception:
+            terminal_state = (
+                MonitorState.STOPPED
+                if self._should_stop()
+                else MonitorState.FAILED
+            )
+            raise
         finally:
-            self._flush_notifications(force=True)
-            self.data_source.close()
-            self._emit_status("stopped")
+            try:
+                self._flush_notifications(force=True)
+                self.data_source.close()
+            except Exception:
+                terminal_state = MonitorState.FAILED
+                raise
+            finally:
+                self._emit_status(terminal_state)
         self.logger.info("Runner stopped: cycles=%s alerts=%s", cycle_count, alert_count)
         return alert_count
 
@@ -359,9 +379,9 @@ class AlertRunner:
     def _should_stop(self) -> bool:
         return bool(self.stop_requested and self.stop_requested())
 
-    def _emit_status(self, status: str) -> None:
+    def _emit_status(self, status: MonitorState | str) -> None:
         if self.callbacks.on_status is not None:
-            self.callbacks.on_status(status)
+            self.callbacks.on_status(MonitorState(status).value)
 
     def _emit_universe(self, universe: Universe) -> None:
         if self.callbacks.on_universe is not None:
