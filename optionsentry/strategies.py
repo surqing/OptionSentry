@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from optionsentry.config import StrategyConfig
-from optionsentry.strategy_base import CompiledStrategy, FullScanCompiledStrategy, Strategy
+from optionsentry.strategy_base import CompiledStrategy, Strategy, StrategyCompilation
 from optionsentry.strategy_registry import create_strategy, get_strategy_class
 
 
@@ -30,11 +30,11 @@ __all__ = [
     "CP_POSITIVE_VALUE_COLOR",
     "CPComboStrategy",
     "CompiledStrategy",
-    "FullScanCompiledStrategy",
     "PUT_MONEYNESS_METRIC",
     "SPREAD_A_MONEYNESS_METRIC",
     "SPREAD_AVG_MONEYNESS_METRIC",
     "SPREAD_B_MONEYNESS_METRIC",
     "Strategy",
+    "StrategyCompilation",
     "build_strategy",
 ]

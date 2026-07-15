@@ -1,105 +1,103 @@
+schema_version = 1
+
 [runtime]
 mode = "live"
-price_basis = "last"
 alert_on_first_match = false
 
 [universe]
-mode = "指定模式"
-only_do = ["AU"]
-not_do = []
-# Live-mode liquidity filters. 0 disables the filter; 1 filters out zero values.
+mode = "include"
+include = ["SHFE.au"]
+exclude = []
+exchanges = ["SHFE"]
 min_volume = 0
 min_open_interest = 0
-# mode = "all"
-# exchange_ids = ["SHFE", "DCE", "CZCE", "INE", "GFEX", "CFFEX"]
-# 指定模式：only_do 先纳入匹配品种/合约，not_do 再从中排除匹配品种/合约。
-# mode = "指定模式"
-# only_do = ["AG"]
-# not_do = ["AG2607"]
 
-[datasource.tqsdk]
-# username = "your-tqsdk-username"
-# password = "your-tqsdk-password"
+[data_source]
+provider = "tqsdk"
+
+[data_source.tqsdk]
 username_env = "TQSDK_USERNAME"
 password_env = "TQSDK_PASSWORD"
-symbol_info_batch_size = 1000
-quote_subscription_batch_size = 1000
+symbol_info_batch_size = 500
+quote_subscription_batch_size = 500
 
 [[strategies]]
+id = "cp_combo_positive"
 type = "cp_combo"
+name = "CP组合正向预警"
+enabled = true
+
+[strategies.parameters]
 min_value = 0.01
 max_value = inf
-name = "CP组合正向预警"
-selected = true
-# Optional per-strategy option filter script. Relative paths resolve from this config file.
-# Packaged example scripts are copied next to config.toml under user_filter_scripts/.
-# filter_script = "user_filter_scripts/by_expire_rest_days.py"
-# filter_function = "accept"
-# filter_scope = "options"
+
+# Optional per-strategy option filter:
+# [strategies.filter]
+# script = "user_filter_scripts/by_expire_rest_days.py"
+# entrypoint = "accept"
 
 [[strategies]]
+id = "cp_combo_negative"
 type = "cp_combo"
+name = "CP组合负向预警"
+enabled = true
+
+[strategies.parameters]
 min_value = -inf
 max_value = -0.01
-name = "CP组合负向预警"
-selected = true
 
 [[strategies]]
+id = "abs_spread_default"
 type = "abs_spread"
+name = "价差预警"
+enabled = true
+
+[strategies.parameters]
 min_value = -inf
 max_value = 0.1
-name = "价差预警"
-selected = true
 
 [backtest]
-start_dt = "2026-01-02"
-end_dt = "2026-01-05"
-duration_seconds = 60
+start_date = 2026-01-01
+end_date = 2026-06-30
+kline_duration_seconds = 60
 data_length = 2
-initial_price_timeout_seconds = 120
+initialization_timeout_seconds = 120
 subscription_batch_size = 50
 
-[notifier]
-# If [notifier.channels] is omitted, live defaults to email+file and backtest defaults to file.
-# Runtime mode is inserted as a subdirectory: logs/live/alerts.jsonl or logs/backtest/alerts.jsonl.
-alert_log_path = "logs/alerts.jsonl"
-
-[notifier.channels]
+[notifications.channels]
 popup = false
 sound = false
 file = true
-email = true
+email = false
 
-[notifier.popup]
+[notifications.file]
+path = "logs/alerts.jsonl"
+
+[notifications.popup]
 duration_seconds = 2
 
-[notifier.sound]
+[notifications.sound]
 duration_seconds = 2
 
-[notifier.email]
-smtp_host = "smtp.example.com"
+[notifications.email]
+smtp_host = ""
 smtp_port = 587
 smtp_timeout_seconds = 10
-# Batch email alerts for this many seconds; 0 sends immediately.
-alert_interval_seconds = 60
-username = "alert@example.com"
+aggregation_seconds = 60
+username_env = "SMTP_USERNAME"
 password_env = "SMTP_PASSWORD"
-from_addr = "alert@example.com"
-to_addrs = ["receiver@example.com"]
+from_address = ""
+to_addresses = []
 use_tls = true
 failure_backoff_seconds = 300
 
 [logging]
 level = "INFO"
-# Runtime mode is inserted as a subdirectory: logs/live/optionsentry.log or logs/backtest/optionsentry.log.
-log_dir = "logs"
-log_file = "optionsentry.log"
-# Rotating logs cap disk usage at about max_bytes * (backup_count + 1).
+directory = "logs"
+filename = "optionsentry.log"
 max_bytes = 5000000
 backup_count = 5
-# INFO cycle summaries are throttled; per-cycle details are available at DEBUG.
-# Set to 0 to log every cycle.
-cycle_summary_interval_seconds = 60
+summary_interval_seconds = 60
 
 [gui.active_alerts]
 auto_refresh = true

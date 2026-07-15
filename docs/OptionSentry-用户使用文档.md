@@ -1,472 +1,370 @@
 # OptionSentry 用户使用文档
 
-> 适用版本：0.1.3
-> 本文档面向最终用户，介绍 OptionSentry 是什么、如何安装部署、如何配置与运行，以及各类功能的使用方法。
+OptionSentry 用于监控期货期权行情，在策略指标进入指定区间时记录并发送预警。它不会自动下单，预警结果需要人工核验。
 
----
+## 一、安装与启动
 
-## 一、项目简介
+### 1. 环境
 
-**OptionSentry** 是一个基于 [TqSdk](https://www.shinnytech.com/tqsdk/) 的**期货期权行情监控与预警工具**。
+- Python 3.11 或更高版本
+- uv
+- TqSdk 账号
+- GUI 用户需要可用的桌面环境
 
-它做的事情很简单：接入期货期权实时行情，自动发现合约、按你设定的策略计算指标，当指标进入你关心的区间时，及时给出预警。
+### 2. 安装
 
-- 支持**实盘行情监控**和**历史回测**两种运行模式。
-- 提供**图形界面（GUI）**和**命令行**两种操作方式。
-- 内置两类策略：`CP组合预警` 和 `价差预警`。
-- 预警可通过**文件、邮件、GUI 弹窗、声音**四种渠道送达。
-
-**重要边界（请务必了解）：**
-
-- 本项目**只做行情分析和告警，不包含任何自动下单、撤单或调仓逻辑**。预警结果需要你自行核验后再做决策。
-- 当前版本仅使用行情的**最新价（last）**作为计算基准。
-- 项目本身不提供交易能力，也不持有任何资金账户的操作权限。
-
----
-
-## 二、环境要求
-
-| 项目 | 要求 |
-| --- | --- |
-| 编程语言 | Python **3.11 或更高版本** |
-| 包管理工具 | `uv`（推荐，用于安装依赖与运行） |
-| 行情数据源 | 一个可用的 **TqSdk 账号**（提供行情与合约元数据）。尚无账号可前往 [https://www.shinnytech.com/](https://www.shinnytech.com/) 注册 |
-| 图形界面 | 当前系统需支持 PyQt6 桌面环境（Windows / Linux / macOS 均可，只要能显示窗口） |
-| Windows 打包 | 需要 PowerShell（仅当你要自行打包 Windows 安装包时） |
-
-**主要依赖库**（已在 `pyproject.toml` 中声明，安装时自动处理）：
-
-- `tqsdk`（行情接入，版本 ≥ 3.10.1）
-- `pyqt6`（图形界面，版本 ≥ 6.11.0）
-- `tomlkit`（配置文件读写，版本 ≥ 0.15.0）
-- 开发/打包用：`pytest`、`pyinstaller`
-
----
-
-## 三、安装部署
-
-### 3.1 首次安装
-
-在项目的根目录下，打开终端（PowerShell / Bash 均可），执行：
-
-```powershell
-# 1. 安装项目依赖（含开发依赖）
+~~~powershell
 uv sync --dev
-
-# 2. 从模板复制出你的配置文件
 Copy-Item config.example.toml config.toml
-```
+~~~
 
-> 说明：`config.example.toml` 是配置模板（内含占位符，不含真实信息），请始终基于它复制出 `config.toml` 后再修改。
+当前配置格式为 schema_version = 1，不兼容旧配置。升级用户应重新复制 config.example.toml，不要把旧字段逐项搬入新文件。
 
-### 3.2 准备 TqSdk 登录凭据
+### 3. 设置凭据
 
-OptionSentry 在运行时需要 TqSdk 账号密码。尚无账号可前往 [https://www.shinnytech.com/](https://www.shinnytech.com/) 注册。推荐通过**环境变量**注入（最安全）：
+推荐使用环境变量：
 
-```powershell
-$env:TQSDK_USERNAME = "your-tqsdk-username"
-$env:TQSDK_PASSWORD = "your-tqsdk-password"
-```
-
-> 如果你使用图形界面，也可以直接在登录页输入账号密码，勾选「记住我」后账号密码会写入当前 `config.toml`（见下方 3.3）。**请勿把包含真实凭据的 `config.toml` 提交到版本库。**
-
-### 3.3 图形界面登录（可选）
-
-直接启动 GUI 后，会出现登录窗口：
-
-1. **配置文件**：默认指向当前目录的 `config.toml`，可点「浏览」选择其他配置文件。
-2. **账号 / 密码**：留空则读取配置文件里已「记住」的账号或环境变量；填写则使用你输入的账号。账号和密码**必须同时填写或同时留空**。
-3. **记住我**：勾选后，登录成功会把账号密码写入所选的 `config.toml`（明文保存，仅建议在本机可信环境使用）。
-4. 点击「登录」，校验通过后进入主窗口。
-
-### 3.4 启动方式
-
-- **图形界面**：`uv run optionsentry-gui`
-- **命令行**：`uv run optionsentry --config config.toml`
-
----
-
-## 四、快速开始
-
-只需四步即可体验核心功能（以实盘监控为例）：
-
-```powershell
-# 1. 安装依赖
-uv sync --dev
-
-# 2. 生成配置文件
-Copy-Item config.example.toml config.toml
-
-# 3. 设置 TqSdk 凭据
+~~~powershell
 $env:TQSDK_USERNAME = "你的账号"
 $env:TQSDK_PASSWORD = "你的密码"
+~~~
 
-# 4. 启动图形界面（推荐新手）
+配置文件只保存环境变量名，不保存账号密码。
+
+### 4. 启动
+
+~~~powershell
+# GUI
 uv run optionsentry-gui
-```
 
-进入主窗口后：
+# 命令行
+uv run optionsentry --config config.toml
+~~~
 
-1. 默认配置已经启用了两条策略（`CP组合正向预警`、`CP组合负向预警`、`价差预警`），合约范围限定在黄金（AU）。
-2. 点击右上角「**启动**」，程序会先登录并发现合约，再开始持续监控行情。
-3. 当某个合约的指标进入预警区间时，会在「**预警**」标签页看到记录，邮件/文件等渠道也会按配置发出通知。
-4. 需要停止时，点击「**停止**」。
+GUI 登录页：
 
-> 想快速改配置？直接点主窗口的「**配置**」标签页，所有设置都能在界面里完成，点「保存配置」即可生效（保存后重新点「启动」会用新配置运行）。
+1. 选择配置文件。
+2. 可临时输入账号和密码，两者必须同时填写。
+3. 两个输入框都留空时，读取配置指定的环境变量。
+4. 登录凭据只在本次进程中使用，不会写回 TOML。
 
----
+## 二、GUI 使用
 
-## 五、详细功能使用说明
+界面面向中文用户设计，内部配置值仍使用英文，保存后可直接供命令行使用。
 
-### 5.1 运行模式（实盘 / 回测）
+### 1. 监控
 
-在配置文件的 `[runtime]` 段设置：
+状态区域显示运行状态、实盘/回测、配置路径、凭据来源、合约数、策略数、条件数和预警数。
 
-```toml
+活跃预警表支持：
+
+- 点击表头排序；
+- 使用表头筛选数值或文本；
+- 按策略名称过滤；
+- 手动刷新或设置中文刷新间隔。
+
+### 2. 预警
+
+显示本次进程中已经触发的预警记录。文件渠道会另外写入 JSONL。
+
+### 3. 配置
+
+可编辑运行、合约范围、策略、回测、TqSdk、通知和日志。
+
+策略表包含：
+
+- 启用
+- ID
+- 类型
+- 名称
+- 参数
+- 筛选脚本
+
+“添加策略”先选择中文策略类型，再打开参数窗口。参数控件由策略定义自动生成；“编辑策略”可修改 ID、中文名称、启用状态、参数和筛选脚本。
+
+保存配置只写文件。若监控正在运行，当前任务继续使用启动时的配置；停止后重新启动才会应用新配置。
+
+### 4. 日志
+
+显示启动、发现合约、编译条件、行情循环和通知错误。完整日志同时写入 logs/live 或 logs/backtest。
+
+## 三、配置说明
+
+完整模板见 [config.example.toml](../config.example.toml)。
+
+### 1. 配置版本
+
+~~~toml
+schema_version = 1
+~~~
+
+缺少版本、版本不支持、未知字段或旧字段都会阻止启动。这样可以避免拼写错误被静默忽略。
+
+### 2. 运行模式
+
+~~~toml
 [runtime]
-mode = "live"                 # live = 实盘监控；backtest = 历史回测
-price_basis = "last"          # 当前仅支持 last（最新价）
-alert_on_first_match = false   # 见下方说明
-```
+mode = "live"
+alert_on_first_match = false
+~~~
 
-- **live（实盘）**：连接 TqSdk 实时行情，持续监控。适合日常盯盘预警。
-- **backtest（回测）**：用 TqSdk 历史行情回放，检验策略在历史时间段的表现。需要同时配置 `[backtest]` 段的起止日期（见 5.5）。
-- **alert_on_first_match**：
-  - `false`（默认）：只在指标「从非触发变为触发」的**那一刻**告警，避免启动即被已有触发状态刷屏。
-  - `true`：首次匹配到区间就立即告警（包括启动瞬间已经处于区间内的情形）。
+- live：实盘行情。
+- backtest：历史回测，必须配置回测起止日期。
+- alert_on_first_match = false：首次发现已经触发的条件不立即预警，只在之后从未触发进入触发时预警。
+- alert_on_first_match = true：首次触发状态也立即预警。
 
-### 5.2 合约范围（监控哪些期权）
+GUI 对应显示“实盘”和“回测”。
 
-在配置文件的 `[universe]` 段设置：
+### 3. 合约范围
 
-```toml
+指定品种或合约：
+
+~~~toml
 [universe]
-mode = "指定模式"              # all = 全市场；指定模式 = 按名单筛选
-only_do = ["AU"]              # 指定模式：先纳入匹配的品种/合约
-not_do = []                   # 再从上面结果中排除
-min_volume = 0                # 实盘流动性过滤，0 = 不启用
-min_open_interest = 0          # 实盘持仓量过滤，0 = 不启用
-```
+mode = "include"
+include = ["SHFE.au"]
+exclude = ["SHFE.au2607"]
+exchanges = ["SHFE"]
+min_volume = 0
+min_open_interest = 0
+~~~
 
-- **all 模式**：扫描全部交易所的活跃期权。可配合 `exchange_ids` 限定交易所，例如 `["SHFE", "DCE", "CZCE", "INE", "GFEX", "CFFEX"]`。
-- **指定模式**：先按 `only_do` 纳入匹配的品种或合约，再用 `not_do` 排除。
-  - 匹配规则：品种代码（如 `AU`）、具体合约代码（如 `AU2607`）都能作为筛选词。
-  - 例：`only_do = ["AG"]` 只监控白银；`only_do = ["AU"]`、`not_do = ["AU2607"]` 监控黄金但排除 2607 合约。
-- **流动性过滤**（仅实盘生效）：`min_volume` 和 `min_open_interest` 设为大于 0 时，会过滤掉成交量/持仓量不达标的合约。`0` 表示不启用该过滤。
+全市场或指定交易所：
 
-> 提示：当订阅的合约总数超过约 13000 个时，程序会拒绝启动并给出压缩范围的建议。请优先使用「指定模式」并缩小范围。
+~~~toml
+[universe]
+mode = "all"
+include = []
+exclude = []
+exchanges = ["SHFE", "DCE"]
+min_volume = 0
+min_open_interest = 0
+~~~
 
-### 5.3 策略配置
+- include 模式必须填写 include。
+- exclude 从已纳入范围中排除品种或具体合约。
+- exchanges 在 all 模式限制交易所；空数组表示不额外限制。
+- min_volume、min_open_interest 大于 0 时在实盘发现阶段过滤低流动性合约。
 
-策略在配置文件中以 `[[strategies]]` 数组配置，每条策略一个表：
+GUI 对应显示“指定范围”和“全部合约”。
 
-```toml
+### 4. TqSdk
+
+~~~toml
+[data_source]
+provider = "tqsdk"
+
+[data_source.tqsdk]
+username_env = "TQSDK_USERNAME"
+password_env = "TQSDK_PASSWORD"
+symbol_info_batch_size = 500
+quote_subscription_batch_size = 500
+~~~
+
+username_env 和 password_env 是环境变量名称，不是账号和密码。
+
+### 5. 策略
+
+~~~toml
 [[strategies]]
+id = "cp_combo_positive"
 type = "cp_combo"
+name = "CP组合正向预警"
+enabled = true
+
+[strategies.parameters]
 min_value = 0.01
 max_value = inf
-name = "CP组合正向预警"
-selected = true
-
-[[strategies]]
-type = "abs_spread"
-min_value = -inf
-max_value = 0.1
-name = "价差预警"
-selected = true
-```
-
-字段含义：
+~~~
 
 | 字段 | 说明 |
 | --- | --- |
-| `type` | 策略类型，支持 `cp_combo`（CP组合）或 `abs_spread`（价差） |
-| `min_value` / `max_value` | 触发区间，**判断条件为 `min_value < 指标值 < max_value`**（开区间，不含端点） |
-| `name` | 展示在日志、GUI、邮件中的名称，建议取易懂的中文名 |
-| `selected` | 是否启用该策略（`true` / `false`） |
-| `filter_script` | 可选，自定义期权筛选脚本路径（相对路径以配置文件所在目录为基准） |
-| `filter_function` | 筛选函数名，默认 `accept` |
-| `filter_scope` | 当前仅支持 `options` |
+| id | 策略实例的唯一身份，使用小写英文、数字、下划线或连字符 |
+| type | 策略实现类型 |
+| name | GUI、日志和通知中显示的中文名称 |
+| enabled | 是否启用 |
+| parameters | 该 type 声明的专属参数 |
 
-#### CP组合预警（cp_combo）
+同一 type 可以配置多条。例如 CP 正向和负向各使用一个 id。
 
-对**同一标的期货、同一行权年月、同一执行价**下的认购期权（C）、认沽期权（P）和标的期货（F），计算 **CP 组合偏离率**：
+所有范围都使用开区间：
 
-```
-偏离率 = (C 最新价 - P 最新价 + 执行价 K - 期货最新价) / 期货最新价
-```
+~~~text
+min_value < 指标值 < max_value
+~~~
 
-当偏离率落入你设定的 `(min_value, max_value)` 区间时触发预警。
+#### CP 组合预警
 
-> 例：模板中 `CP组合正向预警` 设为 `(0.01, +inf)`，即偏离率超过 1% 才预警；`CP组合负向预警` 设为 `(-inf, -0.01)`，即偏离率低于 -1% 才预警。这样把正负两个方向拆成两条独立可开关的策略。
+同一标的、到期和执行价的认购 C、认沽 P、执行价 K 与标的 F：
 
-#### 价差预警（abs_spread）
+~~~text
+指标 = (C - P + K - F) / F
+~~~
 
-对**同一标的期货、同一行权年月、同一期权方向（同为认购或同为认沽）**下的不同行权价期权，两两组合，计算**价差比例**：
+模板用两条 cp_combo 分别监控大于 1% 和小于 -1% 的偏离。
 
-```
-价差比例 = (期权A最新价 - 期权B最新价) / |执行价A - 执行价B|
-```
+#### 价差预警
 
-当价差比例落入设定区间时触发预警。常用于发现相邻行权价之间的定价异常。
+同一标的、到期和期权方向下，不同行权价期权两两组合：
 
-> 例：模板中 `价差预警` 设为 `(-inf, 0.1)`，即价差比例小于 0.1 时预警。
+~~~text
+指标 = (期权A价格 - 期权B价格) / (执行价A - 执行价B)
+~~~
 
-### 5.4 策略级自定义筛选脚本（进阶）
+腿顺序由策略统一处理。
 
-每条策略都可挂一个 Python 脚本，在监控启动阶段按你的规则**只保留关心的期权**。脚本需提供如下函数：
+### 6. 策略筛选脚本
 
-```python
+~~~toml
+[strategies.filter]
+script = "user_filter_scripts/by_expire_rest_days.py"
+entrypoint = "accept"
+~~~
+
+脚本示例：
+
+~~~python
 def accept(option, ctx) -> bool:
-    """返回 True 保留该期权；返回 False 排除它。"""
     if option.expire_rest_days is None:
         return False
     return 10 <= option.expire_rest_days <= 60
-```
+~~~
 
-- 返回值**必须是 `bool`**（`True`/`False`），不能返回 `1`、`0`、`None`、字符串或列表。
-- `option` 是期权的基础信息对象（含标的、行权价、期权方向、到期剩余天数等），**不是实时行情对象**，不含最新价、成交量等实时字段。
-- `ctx.underlying(option)` 可获取该期权对应的标的期货信息。
-- 在配置中启用：
+返回值必须是 bool。脚本使用静态合约信息，不提供实时行情。详细接口见 [筛选函数说明](strategy_filter_accept.md)。
 
-```toml
-[[strategies]]
-type = "cp_combo"
-min_value = 0.01
-max_value = inf
-name = "CP组合正向预警"
-selected = true
-filter_script = "user_filter_scripts/by_expire_rest_days.py"
-filter_function = "accept"
-filter_scope = "options"
-```
+### 7. 回测
 
-项目内置两个示例脚本（位于 `user_filter_scripts/`）：
-
-- `by_expire_rest_days.py`：按「到期剩余天数」区间筛选。
-- `by_expiry.py`：按「到期日期」区间筛选。
-
-> 编写脚本时如需查看 `option` 和 `ctx` 支持的全部字段，见项目 `docs/策略特定的合约范围筛选函数说明文档.md`。
-
-### 5.5 回测模式配置
-
-回测模式需要 `runtime.mode = "backtest"`，并在 `[backtest]` 段配置时间范围：
-
-```toml
+~~~toml
 [backtest]
-start_dt = "2026-01-02"
-end_dt = "2026-01-05"
-duration_seconds = 60
+start_date = 2026-01-02
+end_date = 2026-01-05
+kline_duration_seconds = 60
 data_length = 2
-initial_price_timeout_seconds = 120
+initialization_timeout_seconds = 120
 subscription_batch_size = 50
-```
+~~~
 
-| 字段 | 说明 |
-| --- | --- |
-| `start_dt` / `end_dt` | 回测起止日期，必填 |
-| `duration_seconds` | K 线周期，**当前仅支持 60（秒）** |
-| `data_length` | 每次回放保留的 K 线根数 |
-| `initial_price_timeout_seconds` | 等待初始行情的时间上限（秒） |
-| `subscription_batch_size` | 每批订阅的合约数 |
+- backtest 模式必须提供 start_date 和 end_date。
+- 当前 kline_duration_seconds 只能是 60。
+- 系统按策略实际需要的标的与到期组回放，不会把全部候选合约一次性塞入一个回测订阅。
 
-> 回测会按策略涉及的「标的 + 到期月」分组回放，结果同样写入预警记录、文件与邮件。回测不影响任何真实账户。
+### 8. 通知
 
-### 5.6 预警渠道（通知方式）
+~~~toml
+[notifications.channels]
+popup = false
+sound = false
+file = true
+email = true
 
-在配置文件的 `[notifier]` 段设置：
+[notifications.file]
+path = "logs/alerts.jsonl"
 
-```toml
-[notifier]
-alert_log_path = "logs/alerts.jsonl"   # 文件告警的日志路径
-
-[notifier.channels]
-popup = false     # GUI 本地弹窗
-sound = false     # GUI 声音提示
-file = true       # 写入 JSONL 预警日志
-email = true      # 发送邮件
-
-[notifier.popup]
+[notifications.popup]
 duration_seconds = 2
 
-[notifier.sound]
+[notifications.sound]
 duration_seconds = 2
-```
+~~~
 
-| 渠道 | 说明 |
-| --- | --- |
-| `file` | 把每条预警写入 JSONL 日志文件。路径会按运行模式分目录，例如 `logs/live/alerts.jsonl`（实盘）或 `logs/backtest/alerts.jsonl`（回测） |
-| `email` | 通过 SMTP 发送邮件，支持按 `alert_interval_seconds` 聚合多条预警后批量发送（设为 `0` 则每条立即发） |
-| `popup` | GUI 内弹出提示气泡（仅 GUI 运行时有效） |
-| `sound` | GUI 内蜂鸣声提示（仅 GUI 运行时有效） |
+- popup、sound 只在 GUI 中生效。
+- file 写入 logs/live 或 logs/backtest 下的 JSONL。
+- email 使用 SMTP。
 
-**邮件渠道的完整配置**（SMTP 信息）：
+邮件配置：
 
-```toml
-[notifier.email]
+~~~toml
+[notifications.email]
 smtp_host = "smtp.example.com"
 smtp_port = 587
 smtp_timeout_seconds = 10
-alert_interval_seconds = 60
-username = "alert@example.com"
-password_env = "SMTP_PASSWORD"      # 密码建议走环境变量；也可直接写 password
-from_addr = "alert@example.com"
-to_addrs = ["receiver@example.com"]
+aggregation_seconds = 60
+username_env = "SMTP_USERNAME"
+password_env = "SMTP_PASSWORD"
+from_address = "alert@example.com"
+to_addresses = ["receiver@example.com"]
 use_tls = true
 failure_backoff_seconds = 300
-```
+~~~
 
-> 邮件密码推荐使用环境变量 `SMTP_PASSWORD`。若直接写在配置里，请妥善保管该 `config.toml`。
+设置环境变量：
 
-### 5.7 图形界面（GUI）使用
+~~~powershell
+$env:SMTP_USERNAME = "alert@example.com"
+$env:SMTP_PASSWORD = "你的邮箱授权码"
+~~~
 
-启动 `uv run optionsentry-gui` 并登录后，主窗口包含四个标签页：
+aggregation_seconds = 0 表示每条立即发送；大于 0 时先聚合。SMTP 账号和密码不能直接写进 TOML。
 
-#### 监控 标签页
+### 9. 日志
 
-- 顶部「**状态**」面板展示：运行状态、模式、配置文件、凭据来源、期权数、期货数、价格合约数、策略数、条件数、活跃预警数、累计预警数、最新行情时间。
-- 「**当前活跃预警记录**」表格：实时展示当前处于触发状态的条件（指标仍在区间内即持续显示）。支持的表格交互：
-  - **排序**：点击列标题切换升序/降序。
-  - **筛选**：点击列标题右侧的「筛」按钮，按数值范围（如 `8 10`、`8-10`、`8,10`）过滤行。
-  - **按策略过滤**：表格上方的策略按钮（如「全部策略」「CP组合正向预警」）可只看某一策略的记录。
-  - **刷新**：「手动刷新」按钮立即刷新；勾选「自动刷新」后按设定的间隔（10 秒 / 30 秒 / 1 分钟 / 3 分钟 / 5 分钟 / 10 分钟）自动刷新。
-
-#### 预警 标签页
-
-- 展示**所有触发过的预警记录**（滚动列表），新记录自动追加在底部。同样支持排序与筛选。
-
-#### 配置 标签页
-
-- 提供可视化配置编辑器，覆盖运行、合约范围、策略、回测、TqSdk、通知、日志等全部设置。
-- 策略表格支持「**添加策略**」「**删除**」「**选择脚本**」（挂筛选脚本）。
-- 改完点「**保存配置**」即可写回 `config.toml`；「**重新加载**」可从文件重新读入。
-- 注意：保存配置后，**当前正在运行的监控仍使用启动时的配置**，需停止后再「启动」才会应用新配置。
-
-#### 日志 标签页
-
-- 实时显示运行日志，便于排查问题。
-
-### 5.8 命令行运行
-
-```powershell
-# 使用指定配置文件运行监控
-uv run optionsentry --config config.toml
-```
-
-命令行模式会把日志同时输出到控制台和滚动日志文件（见 5.9），预警按 `[notifier]` 配置发出（GUI 弹窗/声音在命令行模式下不生效）。
-
-### 5.9 日志
-
-运行日志由 `[logging]` 配置，默认写入 `logs/<模式>/optionsentry.log`，并启用滚动日志（控制单个文件体积与备份数）：
-
-```toml
+~~~toml
 [logging]
 level = "INFO"
-log_dir = "logs"
-log_file = "optionsentry.log"
+directory = "logs"
+filename = "optionsentry.log"
 max_bytes = 5000000
 backup_count = 5
-cycle_summary_interval_seconds = 60   # 周期性汇总间隔（秒），0 = 每个周期都记
-```
+summary_interval_seconds = 60
+~~~
 
----
+## 四、常见问题
 
-## 六、常见问题（FAQ）
+### 1. 提示旧字段或未知字段
 
-### Q1. 启动时提示 TqSdk 登录失败 / 需要账号密码？
+当前版本不兼容旧配置。请从最新 config.example.toml 复制新文件。常见已删除字段：
 
-- 还没有 TqSdk 账号？前往 [https://www.shinnytech.com/](https://www.shinnytech.com/) 注册一个。
-- 确认已设置环境变量 `TQSDK_USERNAME` 和 `TQSDK_PASSWORD`，或在 GUI 登录页填写了账号密码。
-- 账号和密码必须**同时填写或同时留空**，只填一个会报错。
-- 若在 GUI 勾选了「记住我」，账号密码已写入 `config.toml`，可直接复用；如失效请重新填写。
-- 仍失败多为账号或密码错误，请到 TqSdk 核对凭据。
+- price_basis
+- datasource
+- notifier
+- only_do、not_do、exchange_ids
+- threshold、selected
+- 策略表中的扁平 min_value、max_value
+- filter_script、filter_function、filter_scope
 
-### Q2. 提示「需要订阅的合约数量过多，已停止启动」？
+不要只删掉报错字段；应按新模板重建结构。
 
-订阅合约数超过约 13000 个上限。请压缩范围：
+### 2. TqSdk 登录失败
 
-- 把 `[universe]` 的 `mode` 从 `all` 改为「指定模式」，只填写要监控的品种（如 `only_do = ["AU"]`）。
-- 缩小 `exchange_ids`，只扫描必要交易所。
-- 提高 `min_volume` 或 `min_open_interest`，过滤掉低流动性期权。
-- 减少要监控的到期月份或标的范围。
+- 账号和密码必须同时输入或同时留空。
+- 留空时检查配置中的 username_env/password_env 及对应环境变量。
+- GUI 不保存凭据，下次启动仍需环境变量或重新输入。
+- 继续失败时检查账号、密码与行情权限。
 
-### Q3. 回测时提示「未能在限定时间内收到初始 K 线行情」？
+### 3. include 模式报错
 
-通常是候选合约过多或网络较慢，导致初始化超时。可：
+universe.mode = "include" 时 include 不能为空。GUI 中选择“指定范围”后填写品种或合约。
 
-- 调大 `initial_price_timeout_seconds`。
-- 缩小 `[universe]` 范围，减少需要订阅的合约数量。
+### 4. 回测无法初始化
 
-### Q4. 邮件预警没收到？
+- 确认起止日期有效。
+- 适当增加 initialization_timeout_seconds。
+- 缩小 universe 范围。
+- 检查账号的历史行情权限。
 
-- 检查 `[notifier.email]` 的 `smtp_host`、`smtp_port`、`use_tls` 是否正确。
-- 确认 `from_addr`、`to_addrs` 已填写，`username` 与密码（`password` 或 `password_env` 对应的环境变量）正确。
-- 若设置了 `alert_interval_seconds > 0`，系统会先聚合一段时间再发送，请稍等或临时设为 `0` 测试。
-- 邮件发送失败后会按 `failure_backoff_seconds` 退避一段时间，期间不再尝试。
+### 5. 邮件未发送
 
-### Q5. 某些期权订阅成功但行情一直为空（NaN）？
+- 检查 notifications.channels.email 是否为 true。
+- 检查 SMTP 主机、端口、TLS、发件人与收件人。
+- 检查 username_env/password_env 对应环境变量。
+- aggregation_seconds 大于 0 时需要等待聚合窗口。
+- 失败后会按 failure_backoff_seconds 暂停重试。
 
-这是**账号行情权限**问题：免费 TqSdk 账号对部分交易所（如 SSE/SZSE 期权）无访问权限，其行情字段会全部为 `NaN`，表现为订阅成功但始终无数据。解决方向：
+### 6. 保存配置后监控没有变化
 
-- 升级为具备相应权限的付费行情账户；或
-- 在 `[universe]` 中过滤掉无权限的交易所/品种。
+停止当前监控，再重新启动。运行中的任务不会热切换配置。
 
-### Q6. 配置保存后监控没有用上新配置？
+### 7. 启动时大量预警
 
-保存配置只写文件。**当前正在运行的监控继续使用启动时的配置**。请先点「停止」，再点「启动」以应用新配置。
+将 alert_on_first_match 设为 false。
 
-### Q7. 「记住我」保存的账号密码安全吗？
+### 8. 某些行情始终为空
 
-GUI 的「记住我」会把 TqSdk / 邮箱密码**以明文写入本地 `config.toml`**（该文件已被 gitignore，不会上传仓库），但属于本机明文风险。建议：
+通常是账号没有相应交易所或历史行情权限。缩小 exchanges/include，或使用具备权限的账户。
 
-- 仅在可信本机使用「记住我」；
-- 或对本地 `config.toml` 做好文件权限保护；
-- 长期方案可改为使用环境变量注入凭据。
+## 五、安全与风险提示
 
-### Q8. 启动就收到大量预警，很吵？
-
-把 `[runtime]` 的 `alert_on_first_match` 设为 `false`（默认即此值）。这样仅在指标「从未触发变为触发」的瞬间告警，不会在启动瞬间把已处于区间内的状态全部报一遍。
-
-### Q9. 为什么有的策略字段会报错（配置校验失败）？
-
-程序在启动前会严格校验配置，常见问题包括：
-
-- `runtime.mode` 必须是 `live` 或 `backtest`。
-- 回测模式必须填写 `start_dt` 与 `end_dt`，且 `duration_seconds` 只能为 `60`。
-- `universe.mode` 为「指定模式」时必须填写 `only_do`。
-- 每条策略必须有 `min_value` 和 `max_value`，且 `min_value < max_value`。
-- 策略 `type` 仅支持 `cp_combo`、`abs_spread`。
-- 筛选脚本路径必须存在、函数必须可加载且返回 `bool`。
-
-出错时控制台/GUI 会给出具体的中文错误信息，按提示修正即可。
-
----
-
-## 七、目录结构参考
-
-```
-.
-├── optionsentry/                 # 应用主包
-│   ├── cli.py                    # 命令行入口
-│   ├── config.py                 # 配置解析与校验
-│   ├── runner.py                 # 监控运行主循环
-│   ├── strategies.py             # 内置策略
-│   ├── notifiers.py              # 文件 / 邮件通知
-│   ├── data_sources/             # TqSdk 数据源（发现/订阅/回测）
-│   └── gui/                      # PyQt6 图形界面
-├── user_filter_scripts/          # 用户筛选脚本示例
-├── docs/                         # 补充文档（含筛选函数字段说明）
-├── config.example.toml           # 配置模板（请复制后修改）
-├── package.ps1                   # Windows 打包脚本（可选）
-└── pyproject.toml                # 项目元数据与依赖
-```
-
----
-
-## 八、注意事项
-
-- `config.toml`、`.env`、日志与打包产物属于本地文件，默认不应提交到版本库。
-- 邮件告警需要配置可用的 SMTP 服务、发件人、收件人及密码（或密码环境变量）。
-- 实盘与回测都依赖 TqSdk 账号权限及对应行情的可用性。
-- 本项目**不提供交易执行能力**，所有预警结果都需你人工核验后再做决策。
-- 回测结果仅反映历史行情下的策略表现，不构成任何投资建议。
+- config.toml、环境变量文件、日志和构建产物不要提交。
+- GUI 输入的凭据不会落盘，但仍应保护运行中的本机进程。
+- 预警不等同于交易信号，不构成投资建议。
+- 回测结果只反映历史数据，不保证未来表现。

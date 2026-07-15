@@ -7,7 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from optionsentry.config import ConfigError, load_config, parse_config
+from optionsentry.config import ConfigError, load_config
+from tests.helpers import parse_test_config as parse_config
 from optionsentry.models import CategoryMeta, InstrumentMeta, Universe
 from optionsentry.data_sources.tqsdk_source import TqSdkDataSource, _row_to_meta
 from tests.helpers import sample_universe
@@ -320,23 +321,23 @@ class UniverseTests(unittest.TestCase):
             {
                 "runtime": {},
                 "universe": {
-                    "mode": "指定模式",
-                    "only_do": ["shfe.au2608", "ag"],
-                    "notDo": ["shfe.au2608c600"],
-                    "exchange_ids": ["shfe"],
+                    "mode": "include",
+                    "include": ["shfe.au2608", "ag"],
+                    "exclude": ["shfe.au2608c600"],
+                    "exchanges": ["shfe"],
                 },
                 "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
             }
         )
 
-        self.assertEqual(config.universe.only_do, ("SHFE.AU2608", "AG"))
-        self.assertEqual(config.universe.not_do, ("SHFE.AU2608C600",))
-        self.assertEqual(config.universe.exchange_ids, ("SHFE",))
+        self.assertEqual(config.universe.include, ("SHFE.AU2608", "AG"))
+        self.assertEqual(config.universe.exclude, ("SHFE.AU2608C600",))
+        self.assertEqual(config.universe.exchanges, ("SHFE",))
 
-        with self.assertRaisesRegex(ConfigError, "universe.only_do"):
+        with self.assertRaisesRegex(ConfigError, "universe.include"):
             parse_config(
                 {
-                    "universe": {"mode": "指定模式"},
+                    "universe": {"mode": "include"},
                     "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
@@ -373,7 +374,7 @@ class UniverseTests(unittest.TestCase):
         self.assertFalse(live_config.notifier.channels.popup)
         self.assertFalse(live_config.notifier.channels.sound)
         self.assertTrue(live_config.notifier.channels.file)
-        self.assertTrue(live_config.notifier.channels.email)
+        self.assertFalse(live_config.notifier.channels.email)
         self.assertEqual(live_config.notifier.popup.duration_seconds, 2)
         self.assertEqual(live_config.notifier.sound.duration_seconds, 2)
 
@@ -442,7 +443,7 @@ class UniverseTests(unittest.TestCase):
         self.assertFalse(config.notifier.channels.popup)
         self.assertFalse(config.notifier.channels.sound)
         self.assertTrue(config.notifier.channels.file)
-        self.assertTrue(config.notifier.channels.email)
+        self.assertFalse(config.notifier.channels.email)
         self.assertEqual(config.notifier.popup.duration_seconds, 2)
         self.assertEqual(config.notifier.sound.duration_seconds, 2)
 
@@ -547,8 +548,8 @@ class UniverseTests(unittest.TestCase):
             api,
             min_volume=0,
             min_open_interest=0,
-            mode="指定模式",
-            only_do=("Ag", "Au"),
+            mode="include",
+            include=("Ag", "Au"),
         )
 
         universe = source.discover_universe()
@@ -582,9 +583,9 @@ class UniverseTests(unittest.TestCase):
             api,
             min_volume=0,
             min_open_interest=0,
-            mode="指定模式",
-            only_do=("Ag", "Au"),
-            not_do=("Ag2608",),
+            mode="include",
+            include=("Ag", "Au"),
+            exclude=("Ag2608",),
         )
 
         universe = source.discover_universe()
@@ -635,8 +636,8 @@ class _FakeDiscoveryDataSource(TqSdkDataSource):
         probe_apis: tuple["_FakeDiscoveryApi", ...] = (),
         quote_subscription_batch_size: int = 10,
         mode: str = "all",
-        only_do: tuple[str, ...] = (),
-        not_do: tuple[str, ...] = (),
+        include: tuple[str, ...] = (),
+        exclude: tuple[str, ...] = (),
     ) -> None:
         self.api = api
         self.probe_apis = list(probe_apis)
@@ -644,9 +645,9 @@ class _FakeDiscoveryDataSource(TqSdkDataSource):
             runtime=SimpleNamespace(mode="live"),
             universe=SimpleNamespace(
                 mode=mode,
-                only_do=only_do,
-                not_do=not_do,
-                exchange_ids=("SHFE",) if mode == "all" else (),
+                include=include,
+                exclude=exclude,
+                exchanges=("SHFE",) if mode == "all" else (),
                 min_volume=min_volume,
                 min_open_interest=min_open_interest,
             ),

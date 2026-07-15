@@ -50,6 +50,9 @@ from optionsentry.config import (
     AppConfig,
     ActiveAlertsViewConfig,
     ConfigError,
+    SCHEMA_VERSION,
+    StrategyConfig,
+    StrategyFilterConfig,
     load_config,
     strategy_display_name,
     strategy_type_display_name,
@@ -60,7 +63,7 @@ from optionsentry.gui.credentials import CredentialResolution, load_and_validate
 from optionsentry.gui.runner_adapter import GuiRunSignals, build_gui_runner
 from optionsentry.models import AlertEvent, ConditionEvaluation, Universe
 from optionsentry.runner import RunnerCycle
-from optionsentry.strategy_base import MetricColumn
+from optionsentry.strategy_base import MetricColumn, StrategyParameterSpec
 from optionsentry.strategy_filters import validate_strategy_filters
 from optionsentry.strategy_registry import (
     get_strategy_class,
@@ -90,6 +93,7 @@ SORT_LABEL_PROPERTY = "optionsentry_sort_label"
 SORT_ORDER_PROPERTY = "optionsentry_sort_order"
 FILTERS_PROPERTY = "optionsentry_filters"
 SORT_ROLE = Qt.ItemDataRole.UserRole
+STRATEGY_DATA_ROLE = Qt.ItemDataRole.UserRole + 1
 RECORD_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 TOAST_DURATION_MS = 1500
 TOAST_FADE_MS = 150
@@ -284,15 +288,151 @@ class AddStrategyDialog(QDialog):
         self.move(dialog_geometry.topLeft())
 
 
+class StrategyEditDialog(QDialog):
+    def __init__(
+        self,
+        strategy_type: str,
+        strategy_id: str,
+        name: str,
+        parameters: Mapping[str, Any],
+        enabled: bool = True,
+        filter_script: str = "",
+        filter_entrypoint: str = "accept",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.strategy_type = strategy_type
+        self.strategy_class = get_strategy_class(strategy_type)
+        self.setWindowTitle("策略参数")
+        self.setModal(True)
+        self.setMinimumWidth(440)
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self.id_edit = QLineEdit(strategy_id)
+        self.name_edit = QLineEdit(name)
+        self.enabled_edit = QCheckBox()
+        self.enabled_edit.setChecked(enabled)
+        form.addRow("策略 ID", self.id_edit)
+        form.addRow("策略类型", QLabel(strategy_type_display_name(strategy_type)))
+        form.addRow("显示名称", self.name_edit)
+        form.addRow("启用", self.enabled_edit)
+        self.parameter_widgets: dict[str, QWidget] = {}
+        defaults = self.strategy_class.default_parameters()
+        for spec in self.strategy_class.parameter_specs:
+            widget = self._parameter_widget(spec, parameters.get(spec.key, defaults.get(spec.key)))
+            self.parameter_widgets[spec.key] = widget
+            form.addRow(spec.label, widget)
+        self.filter_script_edit = QLineEdit(filter_script)
+        self.filter_entrypoint_edit = QLineEdit(filter_entrypoint or "accept")
+        form.addRow("筛选脚本", self.filter_script_edit)
+        form.addRow("筛选入口", self.filter_entrypoint_edit)
+        layout.addLayout(form)
+        self.error_label = QLabel("")
+        self.error_label.setStyleSheet("color: #b42318;")
+        self.error_label.setWordWrap(True)
+        layout.addWidget(self.error_label)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_button is not None:
+            ok_button.setText("确定")
+        cancel_button = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_button is not None:
+            cancel_button.setText("取消")
+        buttons.accepted.connect(self._validate_and_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _parameter_widget(self, spec: StrategyParameterSpec, value: Any) -> QWidget:
+        if spec.kind == "bool":
+            widget = QCheckBox()
+            widget.setChecked(bool(value))
+            return widget
+        if spec.kind == "enum":
+            widget = NoWheelComboBox()
+            labels = spec.choice_labels or spec.choices
+            for label, choice in zip(labels, spec.choices, strict=True):
+                widget.addItem(label, choice)
+            widget.setCurrentIndex(widget.findData(str(value)))
+            return widget
+        if spec.kind == "int":
+            minimum = int(spec.minimum) if spec.minimum is not None else -1_000_000_000
+            maximum = int(spec.maximum) if spec.maximum is not None else 1_000_000_000
+            widget = _spin(minimum, maximum)
+            widget.setValue(int(value))
+            return widget
+        widget = QLineEdit(_format_parameter_value(value))
+        if spec.help_text:
+            widget.setPlaceholderText(spec.help_text)
+        return widget
+
+    def parameters(self) -> dict[str, Any]:
+        raw: dict[str, Any] = {}
+        for spec in self.strategy_class.parameter_specs:
+            widget = self.parameter_widgets[spec.key]
+            if spec.kind == "bool":
+                raw[spec.key] = widget.isChecked()
+            elif spec.kind == "enum":
+                raw[spec.key] = widget.currentData()
+            elif spec.kind == "int":
+                raw[spec.key] = widget.value()
+            elif spec.kind == "float":
+                raw[spec.key] = float(widget.text().strip())
+            else:
+                raw[spec.key] = widget.text()
+        return self.strategy_class.validate_parameters(raw)
+
+    def strategy_data(self) -> dict[str, Any]:
+        strategy_id = self.id_edit.text().strip()
+        name = self.name_edit.text().strip()
+        item: dict[str, Any] = {
+            "id": strategy_id,
+            "type": self.strategy_type,
+            "name": name,
+            "enabled": self.enabled_edit.isChecked(),
+            "parameters": self.parameters(),
+        }
+        script = self.filter_script_edit.text().strip()
+        if script:
+            item["filter"] = {
+                "script": script,
+                "entrypoint": self.filter_entrypoint_edit.text().strip() or "accept",
+            }
+        return item
+
+    def _validate_and_accept(self) -> None:
+        try:
+            data_to_config({
+                "schema_version": SCHEMA_VERSION,
+                "strategies": [self.strategy_data()],
+            })
+        except (TypeError, ValueError) as exc:
+            self.error_label.setText(str(exc))
+            return
+        self.accept()
+
+
+def _format_parameter_value(value: Any) -> str:
+    if isinstance(value, float):
+        return format_key_bound(value)
+    return str(value)
+
+
+def _parameter_summary(parameters: Mapping[str, Any]) -> str:
+    return ", ".join(f"{key}={_format_parameter_value(value)}" for key, value in parameters.items())
+
+
 def _friendly_login_error(message: str) -> str:
     detail = _strip_exception_name(message)
     lowered = detail.lower()
     if "username and password must be both filled or both empty" in lowered:
-        return "账号和密码需要同时填写；如果都留空，将读取已记住的账号或环境变量。"
+        return "账号和密码需要同时填写；如果都留空，将读取配置指定的环境变量。"
     if detail.startswith("TqSdk auth requires "):
         env_names = detail.removeprefix("TqSdk auth requires ").rstrip(".")
         env_names = env_names.replace(" and ", " / ")
-        return f"请输入 TqSdk 账号和密码，或设置已记住的账号/环境变量 {env_names}。"
+        return f"请输入 TqSdk 账号和密码，或设置配置指定的环境变量 {env_names}。"
     if "不能为空" in detail:
         return "请输入 TqSdk 账号和密码。"
     if "用户权限认证失败" in detail or "认证失败" in detail:
@@ -307,23 +447,6 @@ def _strip_exception_name(message: str) -> str:
     if separator and (prefix == "Exception" or prefix.endswith("Error")):
         return suffix.strip()
     return message.strip()
-
-
-def _remember_tqsdk_credentials(
-    config_path: Path,
-    config: AppConfig,
-    credentials: CredentialResolution,
-) -> AppConfig:
-    remembered = replace(
-        config,
-        tqsdk=replace(
-            config.tqsdk,
-            username=credentials.username,
-            password=credentials.password,
-        ),
-    )
-    save_config(config_path, remembered)
-    return remembered
 
 
 class MonitorWorker(QObject):
@@ -450,10 +573,10 @@ class LoginWindow(QWidget):
         form.addRow("配置文件", config_row)
 
         self.username = QLineEdit()
-        self.username.setPlaceholderText("留空则读取配置或 username_env")
+        self.username.setPlaceholderText("留空则读取配置指定的账号环境变量")
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password.setPlaceholderText("留空则读取配置或 password_env")
+        self.password.setPlaceholderText("留空则读取配置指定的密码环境变量")
         self.username.returnPressed.connect(self._submit_login)
         self.password.returnPressed.connect(self._submit_login)
         self.config_path.returnPressed.connect(self._submit_login)
@@ -473,17 +596,13 @@ class LoginWindow(QWidget):
         self.login_button.setDefault(True)
         self.login_button.setAutoDefault(True)
         self.login_button.clicked.connect(self._login)
-        self.remember_me = QCheckBox("记住我")
-        row.addWidget(self.remember_me)
         row.addWidget(self.login_button)
         layout.addLayout(row)
-        self._fill_remembered_credentials()
 
     def _browse_config(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "选择配置文件", ".", "TOML (*.toml);;All Files (*)")
         if path:
             self.config_path.setText(path)
-            self._fill_remembered_credentials()
 
     def _submit_login(self) -> None:
         if self.login_button.isEnabled():
@@ -519,12 +638,6 @@ class LoginWindow(QWidget):
     ) -> None:
         self.login_button.setEnabled(True)
         self.login_button.setText("登录")
-        if self.remember_me.isChecked():
-            try:
-                config = _remember_tqsdk_credentials(config_path, config, credentials)
-            except Exception as exc:
-                self._show_login_error(f"保存账号密码失败: {exc}")
-                return
         self._main_window = MainWindow(config_path, config, credentials)
         self._main_window.show()
         self._main_window.show_toast("登录成功")
@@ -539,17 +652,6 @@ class LoginWindow(QWidget):
         friendly_message = _friendly_login_error(message)
         self.error_label.setText(friendly_message)
         self._toast.show_message(friendly_message)
-
-    def _fill_remembered_credentials(self) -> None:
-        try:
-            config = load_config(Path(self.config_path.text().strip() or _default_config_path()))
-        except Exception:
-            return
-        if config.tqsdk.username and config.tqsdk.password:
-            self.username.setText(config.tqsdk.username)
-            self.password.setText(config.tqsdk.password)
-            self.remember_me.setChecked(True)
-
 
 class MainWindow(QMainWindow):
     def __init__(
@@ -696,10 +798,16 @@ class MainWindow(QMainWindow):
         self._sync_config_summary(config)
 
     def _sync_config_summary(self, config: AppConfig) -> None:
-        self._set_status("mode", config.runtime.mode)
+        self._set_status("mode", {"live": "实盘", "backtest": "回测"}.get(config.runtime.mode, config.runtime.mode))
         self._set_status("config_path", str(self.config_path))
-        self._set_status("credential_source", self.credentials.source)
-        self._set_status("strategies", str(len(config.selected_strategies)))
+        self._set_status(
+            "credential_source",
+            {"session": "本次登录", "environment": "环境变量"}.get(
+                self.credentials.source,
+                self.credentials.source,
+            ),
+        )
+        self._set_status("strategies", str(len(config.enabled_strategies)))
         self._set_strategy_filters(config)
 
     def _start_monitor(self) -> None:
@@ -708,7 +816,7 @@ class MainWindow(QMainWindow):
         try:
             monitor_config = self._config_with_active_refresh(self.config_editor.build_config())
             validate_strategy_filters(
-                monitor_config.selected_strategies,
+                monitor_config.enabled_strategies,
                 self.config_path.resolve().parent,
             )
         except Exception as exc:
@@ -948,7 +1056,7 @@ class MainWindow(QMainWindow):
     def _set_strategy_filters(self, config: AppConfig) -> None:
         strategy_names: list[str] = []
         strategy_types_by_name: dict[str, set[str]] = {}
-        for strategy in config.selected_strategies:
+        for strategy in config.enabled_strategies:
             strategy_name = strategy_display_name(strategy)
             strategy_names.append(strategy_name)
             strategy_types_by_name.setdefault(strategy_name, set()).add(strategy.type)
@@ -1414,8 +1522,6 @@ def _right_align_sort_key(sort_key: object | None) -> bool:
 class ConfigEditor(QWidget):
     def __init__(self) -> None:
         super().__init__()
-        self._tqsdk_username: str | None = None
-        self._tqsdk_password: str | None = None
         self._config_dir = Path(".").resolve()
         outer = QVBoxLayout(self)
         actions = QHBoxLayout()
@@ -1449,12 +1555,10 @@ class ConfigEditor(QWidget):
         box = QGroupBox("运行")
         form = QFormLayout(box)
         self.runtime_mode = NoWheelComboBox()
-        self.runtime_mode.addItems(("live", "backtest"))
-        self.price_basis = QLineEdit("last")
-        self.price_basis.setReadOnly(True)
+        self.runtime_mode.addItem("实盘", "live")
+        self.runtime_mode.addItem("回测", "backtest")
         self.alert_on_first_match = QCheckBox()
         form.addRow("模式", self.runtime_mode)
-        form.addRow("价格字段", self.price_basis)
         form.addRow("首次匹配预警", self.alert_on_first_match)
         self.content_layout.addWidget(box)
 
@@ -1463,21 +1567,22 @@ class ConfigEditor(QWidget):
         form = QFormLayout(box)
         self._universe_form = form
         self.universe_mode = NoWheelComboBox()
-        self.universe_mode.addItems(("all", "指定模式"))
-        self.only_do = QTextEdit()
-        self.only_do.setFixedHeight(70)
-        self.not_do = QTextEdit()
-        self.not_do.setFixedHeight(70)
-        self.exchange_ids = QLineEdit()
+        self.universe_mode.addItem("全部合约", "all")
+        self.universe_mode.addItem("指定范围", "include")
+        self.include_symbols = QTextEdit()
+        self.include_symbols.setFixedHeight(70)
+        self.exclude_symbols = QTextEdit()
+        self.exclude_symbols.setFixedHeight(70)
+        self.exchanges = QLineEdit()
         self.min_volume = _spin(0, 1_000_000_000)
         self.min_open_interest = _spin(0, 1_000_000_000)
         form.addRow("模式", self.universe_mode)
-        form.addRow("指定合约", self.only_do)
-        form.addRow("排除合约", self.not_do)
-        form.addRow("交易所", self.exchange_ids)
+        form.addRow("指定合约", self.include_symbols)
+        form.addRow("排除合约", self.exclude_symbols)
+        form.addRow("交易所", self.exchanges)
         form.addRow("最小成交量", self.min_volume)
         form.addRow("最小持仓量", self.min_open_interest)
-        self.universe_mode.currentTextChanged.connect(self._update_universe_inputs)
+        self.universe_mode.currentIndexChanged.connect(self._update_universe_inputs)
         self._update_universe_inputs()
         self.content_layout.addWidget(box)
 
@@ -1499,8 +1604,11 @@ class ConfigEditor(QWidget):
         row.addWidget(script_button)
         row.addStretch(1)
         layout.addLayout(row)
-        self.strategies = QTableWidget(0, 8)
-        self.strategies.setHorizontalHeaderLabels(("选中", "类型", "最小值", "最大值", "名称", "筛选脚本", "函数", "范围"))
+        edit_button = QPushButton("编辑策略")
+        edit_button.clicked.connect(self._edit_selected_strategy_row)
+        row.insertWidget(1, edit_button)
+        self.strategies = QTableWidget(0, 6)
+        self.strategies.setHorizontalHeaderLabels(("启用", "ID", "类型", "名称", "参数", "筛选脚本"))
         self.strategies.setAlternatingRowColors(True)
         self.strategies.setMinimumHeight(180)
         self.strategies.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -1508,8 +1616,9 @@ class ConfigEditor(QWidget):
         self.strategies.verticalHeader().setDefaultSectionSize(36)
         self.strategies.verticalHeader().setMinimumSectionSize(32)
         self.strategies.verticalHeader().setVisible(False)
-        _configure_resizable_columns(self.strategies, (70, 130, 110, 110, 180, 240, 110, 90))
+        _configure_resizable_columns(self.strategies, (70, 160, 130, 180, 300, 260))
         self.strategies.itemChanged.connect(self._on_strategy_item_changed)
+        self.strategies.itemDoubleClicked.connect(lambda _item: self._edit_selected_strategy_row())
         layout.addWidget(self.strategies)
         self.content_layout.addWidget(box)
 
@@ -1563,9 +1672,7 @@ class ConfigEditor(QWidget):
         self.smtp_port = _spin(1, 65535)
         self.smtp_timeout_seconds = _spin(1, 300)
         self.alert_interval_seconds = _spin(0, 86400)
-        self.email_username = QLineEdit()
-        self.email_password = QLineEdit()
-        self.email_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.email_username_env = QLineEdit()
         self.email_password_env = QLineEdit()
         self.from_addr = QLineEdit()
         self.to_addrs = QLineEdit()
@@ -1579,8 +1686,7 @@ class ConfigEditor(QWidget):
         form.addRow("SMTP端口", self.smtp_port)
         form.addRow("SMTP超时", self.smtp_timeout_seconds)
         form.addRow("邮件聚合秒数", self.alert_interval_seconds)
-        form.addRow("邮箱账号", self.email_username)
-        form.addRow("邮箱密码", self.email_password)
+        form.addRow("邮箱账号变量", self.email_username_env)
         form.addRow("邮箱密码变量", self.email_password_env)
         form.addRow("发件人", self.from_addr)
         form.addRow("收件人", self.to_addrs)
@@ -1607,29 +1713,18 @@ class ConfigEditor(QWidget):
         self.content_layout.addWidget(box)
 
     def set_config(self, config: AppConfig) -> None:
-        self.runtime_mode.setCurrentText(config.runtime.mode)
-        self.price_basis.setText(config.runtime.price_basis)
+        self.runtime_mode.setCurrentIndex(self.runtime_mode.findData(config.runtime.mode))
         self.alert_on_first_match.setChecked(config.runtime.alert_on_first_match)
-        self.universe_mode.setCurrentText(config.universe.mode)
-        self.only_do.setPlainText("\n".join(config.universe.only_do))
-        self.not_do.setPlainText("\n".join(config.universe.not_do))
-        self.exchange_ids.setText(", ".join(config.universe.exchange_ids))
+        self.universe_mode.setCurrentIndex(self.universe_mode.findData(config.universe.mode))
+        self.include_symbols.setPlainText("\n".join(config.universe.include))
+        self.exclude_symbols.setPlainText("\n".join(config.universe.exclude))
+        self.exchanges.setText(", ".join(config.universe.exchanges))
         self._update_universe_inputs()
         self.min_volume.setValue(config.universe.min_volume)
         self.min_open_interest.setValue(config.universe.min_open_interest)
         self.strategies.setRowCount(0)
         for strategy in config.strategies:
-            self._add_strategy_row(
-                strategy.type,
-                strategy.min_value,
-                strategy.max_value,
-                strategy.name or "",
-                strategy.selected,
-                strategy.filter_script or "",
-                strategy.filter_function,
-                strategy.filter_scope,
-                restore_sort=False,
-            )
+            self._add_strategy_row(strategy, restore_sort=False)
         _restore_table_sort(self.strategies)
         _apply_table_filters(self.strategies)
         if config.backtest.start_dt is not None:
@@ -1644,8 +1739,6 @@ class ConfigEditor(QWidget):
         self.data_length.setValue(config.backtest.data_length)
         self.initial_price_timeout_seconds.setValue(config.backtest.initial_price_timeout_seconds)
         self.subscription_batch_size.setValue(config.backtest.subscription_batch_size)
-        self._tqsdk_username = config.tqsdk.username
-        self._tqsdk_password = config.tqsdk.password
         self.username_env.setText(config.tqsdk.username_env)
         self.password_env.setText(config.tqsdk.password_env)
         self.symbol_info_batch_size.setValue(config.tqsdk.symbol_info_batch_size)
@@ -1661,8 +1754,7 @@ class ConfigEditor(QWidget):
         self.smtp_port.setValue(config.notifier.email.smtp_port)
         self.smtp_timeout_seconds.setValue(config.notifier.email.smtp_timeout_seconds)
         self.alert_interval_seconds.setValue(config.notifier.email.alert_interval_seconds)
-        self.email_username.setText(config.notifier.email.username or "")
-        self.email_password.setText(config.notifier.email.password or "")
+        self.email_username_env.setText(config.notifier.email.username_env)
         self.email_password_env.setText(config.notifier.email.password_env)
         self.from_addr.setText(config.notifier.email.from_addr or "")
         self.to_addrs.setText(", ".join(config.notifier.email.to_addrs))
@@ -1680,23 +1772,22 @@ class ConfigEditor(QWidget):
 
     def _data(self) -> dict[str, Any]:
         return {
+            "schema_version": SCHEMA_VERSION,
             "runtime": {
-                "mode": self.runtime_mode.currentText(),
-                "price_basis": "last",
+                "mode": str(self.runtime_mode.currentData()),
                 "alert_on_first_match": self.alert_on_first_match.isChecked(),
             },
             "universe": {
-                "mode": self.universe_mode.currentText(),
-                "only_do": _split_lines(self.only_do.toPlainText()),
-                "not_do": _split_lines(self.not_do.toPlainText()),
-                "exchange_ids": _split_csv(self.exchange_ids.text()),
+                "mode": str(self.universe_mode.currentData()),
+                "include": _split_lines(self.include_symbols.toPlainText()),
+                "exclude": _split_lines(self.exclude_symbols.toPlainText()),
+                "exchanges": _split_csv(self.exchanges.text()),
                 "min_volume": self.min_volume.value(),
                 "min_open_interest": self.min_open_interest.value(),
             },
-            "datasource": {
+            "data_source": {
+                "provider": "tqsdk",
                 "tqsdk": {
-                    "username": self._tqsdk_username,
-                    "password": self._tqsdk_password,
                     "username_env": self.username_env.text().strip() or "TQSDK_USERNAME",
                     "password_env": self.password_env.text().strip() or "TQSDK_PASSWORD",
                     "symbol_info_batch_size": self.symbol_info_batch_size.value(),
@@ -1705,14 +1796,14 @@ class ConfigEditor(QWidget):
             },
             "strategies": self._strategy_data(),
             "backtest": {
-                "start_dt": self.backtest_start.text().strip() or None,
-                "end_dt": self.backtest_end.text().strip() or None,
-                "duration_seconds": self.duration_seconds.value(),
+                "start_date": self.backtest_start.text().strip() or None,
+                "end_date": self.backtest_end.text().strip() or None,
+                "kline_duration_seconds": self.duration_seconds.value(),
                 "data_length": self.data_length.value(),
-                "initial_price_timeout_seconds": self.initial_price_timeout_seconds.value(),
+                "initialization_timeout_seconds": self.initial_price_timeout_seconds.value(),
                 "subscription_batch_size": self.subscription_batch_size.value(),
             },
-            "notifier": {
+            "notifications": {
                 "channels": {
                     "popup": self.notify_popup.isChecked(),
                     "sound": self.notify_sound.isChecked(),
@@ -1725,36 +1816,35 @@ class ConfigEditor(QWidget):
                 "sound": {
                     "duration_seconds": self.sound_duration_seconds.value(),
                 },
-                "alert_log_path": self.alert_log_path.text().strip() or "logs/alerts.jsonl",
+                "file": {"path": self.alert_log_path.text().strip() or "logs/alerts.jsonl"},
                 "email": {
                     "smtp_host": self.smtp_host.text().strip() or None,
                     "smtp_port": self.smtp_port.value(),
                     "smtp_timeout_seconds": self.smtp_timeout_seconds.value(),
-                    "alert_interval_seconds": self.alert_interval_seconds.value(),
-                    "username": self.email_username.text().strip() or None,
-                    "password": self.email_password.text() or None,
+                    "aggregation_seconds": self.alert_interval_seconds.value(),
+                    "username_env": self.email_username_env.text().strip() or "SMTP_USERNAME",
                     "password_env": self.email_password_env.text().strip() or "SMTP_PASSWORD",
-                    "from_addr": self.from_addr.text().strip() or None,
-                    "to_addrs": _split_csv(self.to_addrs.text()),
+                    "from_address": self.from_addr.text().strip(),
+                    "to_addresses": _split_csv(self.to_addrs.text()),
                     "use_tls": self.use_tls.isChecked(),
                     "failure_backoff_seconds": self.failure_backoff_seconds.value(),
                 },
             },
             "logging": {
                 "level": self.log_level.currentText(),
-                "log_dir": self.log_dir.text().strip() or "logs",
-                "log_file": self.log_file.text().strip() or "optionsentry.log",
+                "directory": self.log_dir.text().strip() or "logs",
+                "filename": self.log_file.text().strip() or "optionsentry.log",
                 "max_bytes": self.max_bytes.value(),
                 "backup_count": self.backup_count.value(),
-                "cycle_summary_interval_seconds": self.cycle_summary_interval_seconds.value(),
+                "summary_interval_seconds": self.cycle_summary_interval_seconds.value(),
             },
         }
 
     def _update_universe_inputs(self) -> None:
-        mode = self.universe_mode.currentText()
-        self._set_universe_row_visible(self.exchange_ids, mode == "all")
-        self._set_universe_row_visible(self.only_do, mode == "指定模式")
-        self._set_universe_row_visible(self.not_do, mode == "指定模式")
+        mode = self.universe_mode.currentData()
+        self._set_universe_row_visible(self.exchanges, mode == "all")
+        self._set_universe_row_visible(self.include_symbols, mode == "include")
+        self._set_universe_row_visible(self.exclude_symbols, mode == "include")
 
     def _set_universe_row_visible(self, widget: QWidget, visible: bool) -> None:
         label = self._universe_form.labelForField(widget)
@@ -1763,73 +1853,87 @@ class ConfigEditor(QWidget):
         widget.setVisible(visible)
 
     def _strategy_data(self) -> list[dict[str, Any]]:
-        rows = []
-        supported_types = supported_strategy_types()
-        default_strategy_type = supported_types[0] if supported_types else ""
+        rows: list[dict[str, Any]] = []
         for row in range(self.strategies.rowCount()):
-            selected = _table_checked(self.strategies, row, 0)
-            strategy_type = _table_text(self.strategies, row, 1) or default_strategy_type
-            min_value = float(_table_text(self.strategies, row, 2) or "-inf")
-            max_value = float(_table_text(self.strategies, row, 3) or "inf")
-            name = _table_text(self.strategies, row, 4)
-            filter_script = _table_text(self.strategies, row, 5)
-            filter_function = _table_text(self.strategies, row, 6) or "accept"
-            filter_scope = _table_text(self.strategies, row, 7) or "options"
+            parameters_item = self.strategies.item(row, 4)
+            filter_item = self.strategies.item(row, 5)
             item = {
-                "type": strategy_type,
-                "min_value": min_value,
-                "max_value": max_value,
-                "selected": selected,
+                "id": _table_text(self.strategies, row, 1),
+                "type": str(self.strategies.item(row, 2).data(STRATEGY_DATA_ROLE)),
+                "name": _table_text(self.strategies, row, 3),
+                "enabled": _table_checked(self.strategies, row, 0),
+                "parameters": dict(parameters_item.data(STRATEGY_DATA_ROLE) or {}),
             }
-            if name:
-                item["name"] = name
+            filter_script = filter_item.text().strip() if filter_item is not None else ""
             if filter_script:
-                item["filter_script"] = filter_script
-                item["filter_function"] = filter_function
-                item["filter_scope"] = filter_scope
+                item["filter"] = {
+                    "script": filter_script,
+                    "entrypoint": str(filter_item.data(STRATEGY_DATA_ROLE) or "accept"),
+                }
             rows.append(item)
         return rows
 
     def _add_strategy_row(
         self,
-        strategy_type: str,
-        min_value: float,
-        max_value: float,
-        name: str,
-        selected: bool = True,
-        filter_script: str = "",
-        filter_function: str = "accept",
-        filter_scope: str = "options",
+        strategy: StrategyConfig,
         restore_sort: bool = True,
     ) -> None:
         row = self.strategies.rowCount()
         self.strategies.insertRow(row)
-        selected_item = _table_item("", sort_key=1 if selected else 0)
-        selected_item.setFlags(
+        self._write_strategy_row(row, strategy)
+        if restore_sort:
+            _restore_table_sort(self.strategies)
+            _apply_table_filters(self.strategies)
+
+    def _write_strategy_row(self, row: int, strategy: StrategyConfig) -> None:
+        enabled_item = _table_item("", sort_key=1 if strategy.enabled else 0)
+        enabled_item.setFlags(
             Qt.ItemFlag.ItemIsUserCheckable
             | Qt.ItemFlag.ItemIsEnabled
             | Qt.ItemFlag.ItemIsSelectable
         )
-        selected_item.setCheckState(Qt.CheckState.Checked if selected else Qt.CheckState.Unchecked)
-        selected_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.strategies.setItem(row, 0, selected_item)
-        self.strategies.setItem(row, 1, _table_item(strategy_type, sort_key=strategy_type.casefold()))
-        self.strategies.setItem(row, 2, _table_item(_format_bound(min_value), sort_key=min_value))
-        self.strategies.setItem(row, 3, _table_item(_format_bound(max_value), sort_key=max_value))
-        self.strategies.setItem(row, 4, _table_item(name, sort_key=name.casefold()))
-        self.strategies.setItem(row, 5, _table_item(filter_script, sort_key=filter_script.casefold()))
-        self.strategies.setItem(row, 6, _table_item(filter_function, sort_key=filter_function.casefold()))
-        self.strategies.setItem(row, 7, _table_item(filter_scope, sort_key=filter_scope.casefold()))
-        if restore_sort:
-            _restore_table_sort(self.strategies)
-            _apply_table_filters(self.strategies)
+        enabled_item.setCheckState(Qt.CheckState.Checked if strategy.enabled else Qt.CheckState.Unchecked)
+        enabled_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.strategies.setItem(row, 0, enabled_item)
+        values = (strategy.id, strategy_type_display_name(strategy.type), strategy.name)
+        for column, value in enumerate(values, start=1):
+            item = _table_item(value, sort_key=value.casefold())
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            if column == 2:
+                item.setData(STRATEGY_DATA_ROLE, strategy.type)
+            self.strategies.setItem(row, column, item)
+        parameters = dict(strategy.parameters)
+        parameters_item = _table_item(_parameter_summary(parameters))
+        parameters_item.setData(STRATEGY_DATA_ROLE, parameters)
+        parameters_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        self.strategies.setItem(row, 4, parameters_item)
+        filter_script = strategy.filter.script if strategy.filter is not None else ""
+        filter_item = _table_item(filter_script, sort_key=filter_script.casefold())
+        filter_item.setData(
+            STRATEGY_DATA_ROLE,
+            strategy.filter.entrypoint if strategy.filter is not None else "accept",
+        )
+        filter_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        self.strategies.setItem(row, 5, filter_item)
 
     def _add_selected_strategy_row(self) -> None:
         strategy_type = self._prompt_strategy_type_to_add()
         if strategy_type is None:
             return
-        min_value, max_value = _default_strategy_range(strategy_type)
-        self._add_strategy_row(strategy_type, min_value, max_value, "", True)
+        strategy_class = get_strategy_class(strategy_type)
+        dialog = StrategyEditDialog(
+            strategy_type=strategy_type,
+            strategy_id=self._next_strategy_id(strategy_type),
+            name=strategy_class.display_name,
+            parameters=strategy_class.default_parameters(),
+            parent=self.window(),
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        strategy = data_to_config(
+            {"schema_version": SCHEMA_VERSION, "strategies": [dialog.strategy_data()]}
+        ).strategies[0]
+        self._add_strategy_row(strategy)
 
     def _prompt_strategy_type_to_add(self) -> str | None:
         dialog = AddStrategyDialog(supported_strategy_types(), self.window())
@@ -1859,6 +1963,42 @@ class ConfigEditor(QWidget):
         else:
             item.setText(display_path)
 
+    def _edit_selected_strategy_row(self) -> None:
+        row = self.strategies.currentRow()
+        if row < 0:
+            return
+        item = self._strategy_data()[row]
+        filter_data = item.get("filter", {})
+        dialog = StrategyEditDialog(
+            strategy_type=str(item["type"]),
+            strategy_id=str(item["id"]),
+            name=str(item["name"]),
+            parameters=dict(item["parameters"]),
+            enabled=bool(item["enabled"]),
+            filter_script=str(filter_data.get("script", "")),
+            filter_entrypoint=str(filter_data.get("entrypoint", "accept")),
+            parent=self.window(),
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        all_rows = self._strategy_data()
+        all_rows[row] = dialog.strategy_data()
+        parsed = data_to_config({"schema_version": SCHEMA_VERSION, "strategies": all_rows})
+        self._write_strategy_row(row, parsed.strategies[row])
+        _apply_table_filters(self.strategies)
+
+    def _next_strategy_id(self, strategy_type: str) -> str:
+        existing = {
+            _table_text(self.strategies, row, 1)
+            for row in range(self.strategies.rowCount())
+        }
+        if strategy_type not in existing:
+            return strategy_type
+        index = 2
+        while f"{strategy_type}_{index}" in existing:
+            index += 1
+        return f"{strategy_type}_{index}"
+
     def _remove_strategy_row(self) -> None:
         row = self.strategies.currentRow()
         if row >= 0:
@@ -1868,11 +2008,6 @@ class ConfigEditor(QWidget):
         sort_key: object | None
         if item.column() == 0:
             sort_key = 1 if item.checkState() == Qt.CheckState.Checked else 0
-        elif item.column() in {2, 3}:
-            try:
-                sort_key = float(item.text().strip())
-            except ValueError:
-                sort_key = item.text().casefold()
         else:
             sort_key = item.text().casefold()
         if item.data(SORT_ROLE) != sort_key:
@@ -2103,17 +2238,6 @@ def _format_status_timestamp(timestamp: str) -> str:
 
 def _format_warning_range(min_value: float, max_value: float) -> str:
     return format_key_range(min_value, max_value)
-
-
-def _format_bound(value: float) -> str:
-    return format_key_bound(value)
-
-
-def _default_strategy_range(strategy_type: str) -> tuple[float, float]:
-    try:
-        return get_strategy_class(strategy_type).default_range()
-    except ValueError:
-        return 0.01, math.inf
 
 
 def _split_csv(value: str) -> list[str]:

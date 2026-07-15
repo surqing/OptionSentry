@@ -12,10 +12,10 @@ from optionsentry.models import AlertEvent, ConditionEvaluation
 class GuiSmokeTests(unittest.TestCase):
     def test_pyqt_login_window_constructs_offscreen(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        from PyQt6.QtWidgets import QApplication, QComboBox, QHeaderView, QSpinBox, QToolBar
+        from PyQt6.QtWidgets import QApplication, QComboBox, QDialog, QHeaderView, QSpinBox, QToolBar
         from PyQt6.QtCore import Qt
 
-        from optionsentry.config import parse_config
+        from tests.helpers import parse_test_config as parse_config
         from optionsentry.gui.app import (
             APP_ICON_PATH,
             APP_NAME,
@@ -41,10 +41,10 @@ class GuiSmokeTests(unittest.TestCase):
         window = LoginWindow()
         window.show()
         self.assertTrue(window.login_button.isDefault())
-        self.assertEqual(window.remember_me.text(), "记住我")
+        self.assertFalse(hasattr(window, "remember_me"))
         window._show_login_error("ConfigError: TqSdk username and password must be both filled or both empty.")
         app.processEvents()
-        self.assertEqual(window.error_label.text(), "账号和密码需要同时填写；如果都留空，将读取已记住的账号或环境变量。")
+        self.assertEqual(window.error_label.text(), "账号和密码需要同时填写；如果都留空，将读取配置指定的环境变量。")
         self.assertEqual(window._toast._duration_ms, TOAST_DURATION_MS)
         self.assertEqual(window._toast._label.text(), window.error_label.text())
         self.assertTrue(bool(window._toast.windowFlags() & Qt.WindowType.FramelessWindowHint))
@@ -65,7 +65,7 @@ class GuiSmokeTests(unittest.TestCase):
         window.password.clear()
         window.username.returnPressed.emit()
         app.processEvents()
-        self.assertEqual(window.error_label.text(), "账号和密码需要同时填写；如果都留空，将读取已记住的账号或环境变量。")
+        self.assertEqual(window.error_label.text(), "账号和密码需要同时填写；如果都留空，将读取配置指定的环境变量。")
         window.username.clear()
         config = parse_config(
             {
@@ -101,13 +101,13 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertFalse(main_window.config_editor.notify_popup.isChecked())
         self.assertFalse(main_window.config_editor.notify_sound.isChecked())
         self.assertTrue(main_window.config_editor.notify_file.isChecked())
-        self.assertTrue(main_window.config_editor.notify_email.isChecked())
+        self.assertFalse(main_window.config_editor.notify_email.isChecked())
         self.assertEqual(main_window.config_editor.popup_duration_seconds.value(), 2)
         self.assertEqual(main_window.config_editor.sound_duration_seconds.value(), 2)
         self.assertFalse(editor_config.notifier.channels.popup)
         self.assertFalse(editor_config.notifier.channels.sound)
         self.assertTrue(editor_config.notifier.channels.file)
-        self.assertTrue(editor_config.notifier.channels.email)
+        self.assertFalse(editor_config.notifier.channels.email)
         self.assertEqual(main_window.findChildren(QToolBar), [])
         self.assertIs(main_window.save_action, main_window.config_editor.save_button)
         self.assertIs(main_window.reload_action, main_window.config_editor.reload_button)
@@ -115,23 +115,27 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(main_window.config_editor.reload_button.text(), "重新加载")
         self.assertIsInstance(main_window.config_editor.min_volume, QSpinBox)
         self.assertIsInstance(main_window.config_editor.min_open_interest, QSpinBox)
-        self.assertFalse(main_window.config_editor.exchange_ids.isHidden())
-        self.assertTrue(main_window.config_editor.only_do.isHidden())
-        self.assertTrue(main_window.config_editor.not_do.isHidden())
-        main_window.config_editor.universe_mode.setCurrentText("指定模式")
+        self.assertFalse(main_window.config_editor.exchanges.isHidden())
+        self.assertTrue(main_window.config_editor.include_symbols.isHidden())
+        self.assertTrue(main_window.config_editor.exclude_symbols.isHidden())
+        main_window.config_editor.universe_mode.setCurrentIndex(
+            main_window.config_editor.universe_mode.findData("include")
+        )
         app.processEvents()
-        self.assertTrue(main_window.config_editor.exchange_ids.isHidden())
-        self.assertFalse(main_window.config_editor.only_do.isHidden())
-        self.assertFalse(main_window.config_editor.not_do.isHidden())
-        main_window.config_editor.only_do.setPlainText("Ag, Au")
-        main_window.config_editor.not_do.setPlainText("Ag2607")
-        self.assertEqual(main_window.config_editor.build_config().universe.only_do, ("AG", "AU"))
-        self.assertEqual(main_window.config_editor.build_config().universe.not_do, ("AG2607",))
-        main_window.config_editor.universe_mode.setCurrentText("all")
+        self.assertTrue(main_window.config_editor.exchanges.isHidden())
+        self.assertFalse(main_window.config_editor.include_symbols.isHidden())
+        self.assertFalse(main_window.config_editor.exclude_symbols.isHidden())
+        main_window.config_editor.include_symbols.setPlainText("Ag, Au")
+        main_window.config_editor.exclude_symbols.setPlainText("Ag2607")
+        self.assertEqual(main_window.config_editor.build_config().universe.include, ("AG", "AU"))
+        self.assertEqual(main_window.config_editor.build_config().universe.exclude, ("AG2607",))
+        main_window.config_editor.universe_mode.setCurrentIndex(
+            main_window.config_editor.universe_mode.findData("all")
+        )
         app.processEvents()
-        self.assertFalse(main_window.config_editor.exchange_ids.isHidden())
-        self.assertTrue(main_window.config_editor.only_do.isHidden())
-        self.assertTrue(main_window.config_editor.not_do.isHidden())
+        self.assertFalse(main_window.config_editor.exchanges.isHidden())
+        self.assertTrue(main_window.config_editor.include_symbols.isHidden())
+        self.assertTrue(main_window.config_editor.exclude_symbols.isHidden())
         main_window.config_editor.min_volume.setValue(100)
         self.assertEqual(main_window.config_editor.min_volume.text(), "100")
         self.assertEqual(main_window.config_editor.build_config().universe.min_volume, 100)
@@ -148,7 +152,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertFalse(notifier_config.channels.email)
         self.assertEqual(notifier_config.popup.duration_seconds, 5)
         self.assertEqual(notifier_config.sound.duration_seconds, 7)
-        self.assertEqual(main_window.config_editor.strategies.columnCount(), 8)
+        self.assertEqual(main_window.config_editor.strategies.columnCount(), 6)
         self.assertGreaterEqual(main_window.config_editor.strategies.minimumHeight(), 180)
         self.assertEqual(
             main_window.config_editor.strategies.item(0, 0).checkState(),
@@ -159,12 +163,10 @@ class GuiSmokeTests(unittest.TestCase):
             Qt.CheckState.Unchecked,
         )
         self.assertEqual(
-            [strategy.type for strategy in main_window.config_editor.build_config().selected_strategies],
+            [strategy.type for strategy in main_window.config_editor.build_config().enabled_strategies],
             ["cp_combo"],
         )
         self.assertEqual(main_window.config_editor.strategies.item(0, 5).text(), "")
-        self.assertEqual(main_window.config_editor.strategies.item(0, 6).text(), "accept")
-        self.assertEqual(main_window.config_editor.strategies.item(0, 7).text(), "options")
         main_window.config_editor.strategies.item(0, 5).setText("filters/gold.py")
         self.assertEqual(main_window.config_editor.build_config().strategies[0].filter_script, "filters/gold.py")
         self.assertFalse(hasattr(main_window.config_editor, "strategy_type_to_add"))
@@ -186,14 +188,17 @@ class GuiSmokeTests(unittest.TestCase):
         strategy_combo.setCurrentIndex(1)
         self.assertEqual(dialog.selected_strategy_type(), "abs_spread")
         row_count = main_window.config_editor.strategies.rowCount()
-        with patch.object(main_window.config_editor, "_prompt_strategy_type_to_add", return_value="abs_spread"):
+        with (
+            patch.object(main_window.config_editor, "_prompt_strategy_type_to_add", return_value="abs_spread"),
+            patch("optionsentry.gui.app.StrategyEditDialog.exec", return_value=QDialog.DialogCode.Accepted),
+        ):
             main_window.config_editor.add_strategy_button.click()
         self.assertEqual(main_window.config_editor.strategies.rowCount(), row_count + 1)
         added = main_window.config_editor.build_config().strategies[-1]
         self.assertEqual(added.type, "abs_spread")
-        self.assertEqual(added.min_value, float("-inf"))
-        self.assertEqual(added.max_value, 0.1)
-        self.assertTrue(added.selected)
+        self.assertEqual(added.parameters["min_value"], float("-inf"))
+        self.assertEqual(added.parameters["max_value"], 0.1)
+        self.assertTrue(added.enabled)
         with patch.object(main_window.config_editor, "_prompt_strategy_type_to_add", return_value=None):
             main_window.config_editor.add_strategy_button.click()
         self.assertEqual(main_window.config_editor.strategies.rowCount(), row_count + 1)
@@ -313,16 +318,22 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertFalse(main_window.start_button.isEnabled())
         self.assertTrue(main_window.stop_button.isEnabled())
 
-        main_window.config_editor.runtime_mode.setCurrentText("live")
+        main_window.config_editor.runtime_mode.setCurrentIndex(
+            main_window.config_editor.runtime_mode.findData("live")
+        )
         event = _FakeWheelEvent()
         main_window.config_editor.runtime_mode.wheelEvent(event)
-        self.assertEqual(main_window.config_editor.runtime_mode.currentText(), "live")
+        self.assertEqual(main_window.config_editor.runtime_mode.currentText(), "实盘")
+        self.assertEqual(main_window.config_editor.runtime_mode.currentData(), "live")
         self.assertTrue(event.ignored)
 
-        main_window.config_editor.universe_mode.setCurrentText("all")
+        main_window.config_editor.universe_mode.setCurrentIndex(
+            main_window.config_editor.universe_mode.findData("all")
+        )
         event = _FakeWheelEvent()
         main_window.config_editor.universe_mode.wheelEvent(event)
-        self.assertEqual(main_window.config_editor.universe_mode.currentText(), "all")
+        self.assertEqual(main_window.config_editor.universe_mode.currentText(), "全部合约")
+        self.assertEqual(main_window.config_editor.universe_mode.currentData(), "all")
         self.assertTrue(event.ignored)
 
         spin = _spin(0, 10)
@@ -345,7 +356,7 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from optionsentry.config import parse_config
+        from tests.helpers import parse_test_config as parse_config
         from optionsentry.gui.app import MainWindow
         from optionsentry.gui.credentials import CredentialResolution
 
@@ -408,7 +419,7 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from optionsentry.config import parse_config
+        from tests.helpers import parse_test_config as parse_config
         from optionsentry.gui.app import CP_NEGATIVE_VALUE_COLOR, CP_POSITIVE_VALUE_COLOR, MainWindow
         from optionsentry.gui.credentials import CredentialResolution
         from optionsentry.runner import RunnerCycle
@@ -466,7 +477,7 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from optionsentry.config import parse_config
+        from tests.helpers import parse_test_config as parse_config
         from optionsentry.gui.app import MainWindow, _set_table_filter_text
         from optionsentry.gui.credentials import CredentialResolution
         from optionsentry.runner import RunnerCycle
@@ -569,7 +580,7 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from optionsentry.config import parse_config
+        from tests.helpers import parse_test_config as parse_config
         from optionsentry.gui.app import MainWindow
         from optionsentry.gui.credentials import CredentialResolution
 
@@ -603,10 +614,16 @@ class GuiSmokeTests(unittest.TestCase):
             ("10.00000000", "2.00000000", "-1.00000000"),
         )
 
-        main_window.config_editor.strategies.horizontalHeader().sectionClicked.emit(3)
-        self.assertEqual(_column_texts(main_window.config_editor.strategies, 3), ("0.1", "inf"))
-        main_window.config_editor.strategies.horizontalHeader().sectionClicked.emit(3)
-        self.assertEqual(_column_texts(main_window.config_editor.strategies, 3), ("inf", "0.1"))
+        main_window.config_editor.strategies.horizontalHeader().sectionClicked.emit(4)
+        self.assertEqual(
+            _column_texts(main_window.config_editor.strategies, 4),
+            ("min_value=-inf, max_value=0.1", "min_value=0.01, max_value=inf"),
+        )
+        main_window.config_editor.strategies.horizontalHeader().sectionClicked.emit(4)
+        self.assertEqual(
+            _column_texts(main_window.config_editor.strategies, 4),
+            ("min_value=0.01, max_value=inf", "min_value=-inf, max_value=0.1"),
+        )
         app.processEvents()
         main_window.close()
 
@@ -614,7 +631,7 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from optionsentry.config import parse_config
+        from tests.helpers import parse_test_config as parse_config
         from optionsentry.gui.app import MainWindow, _set_table_filter_text
         from optionsentry.gui.credentials import CredentialResolution
 
@@ -652,7 +669,7 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from optionsentry.config import parse_config
+        from tests.helpers import parse_test_config as parse_config
         from optionsentry.gui.app import MainWindow
         from optionsentry.gui.credentials import CredentialResolution
 
@@ -689,7 +706,7 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from optionsentry.config import parse_config
+        from tests.helpers import parse_test_config as parse_config
         from optionsentry.gui.app import MainWindow
         from optionsentry.gui.credentials import CredentialResolution
 
@@ -741,7 +758,7 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from optionsentry.config import parse_config
+        from tests.helpers import parse_test_config as parse_config
         from optionsentry.gui.app import MainWindow
         from optionsentry.gui.credentials import CredentialResolution
         from optionsentry.runner import RunnerCycle
@@ -799,7 +816,7 @@ class GuiSmokeTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from optionsentry.config import parse_config
+        from tests.helpers import parse_test_config as parse_config
         from optionsentry.gui.app import MainWindow
         from optionsentry.gui.credentials import CredentialResolution
 
@@ -845,11 +862,12 @@ class GuiSmokeTests(unittest.TestCase):
         app.processEvents()
         main_window.close()
 
-    def test_login_success_remembers_credentials_and_shows_toast(self) -> None:
+    def test_login_success_keeps_credentials_in_session_only_and_shows_toast(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtWidgets import QApplication
 
-        from optionsentry.config import load_config, parse_config
+        from tests.helpers import parse_test_config as parse_config
+        from optionsentry.gui.config_store import save_config
         from optionsentry.gui.app import LoginWindow, _apply_style
         from optionsentry.gui.credentials import CredentialResolution
 
@@ -857,20 +875,13 @@ class GuiSmokeTests(unittest.TestCase):
         _apply_style(app)
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.toml"
-            config_path.write_text(
-                "[[strategies]]\n"
-                'type = "cp_combo"\n'
-                "min_value = 0.01\n"
-                "max_value = inf\n",
-                encoding="utf-8",
-            )
             config = parse_config({"strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}]})
+            save_config(config_path, config)
+            original_text = config_path.read_text(encoding="utf-8")
             window = LoginWindow()
             window.config_path.setText(str(config_path))
             window.username.setText("alice")
             window.password.setText("secret")
-            window.remember_me.setChecked(True)
-
             window._on_login_success(
                 config_path,
                 config,
@@ -878,20 +889,20 @@ class GuiSmokeTests(unittest.TestCase):
             )
             app.processEvents()
 
-            saved = load_config(config_path)
-            self.assertEqual(saved.tqsdk.username, "alice")
-            self.assertEqual(saved.tqsdk.password, "secret")
+            self.assertEqual(config_path.read_text(encoding="utf-8"), original_text)
+            self.assertNotIn("alice", original_text)
+            self.assertNotIn("secret", original_text)
             self.assertIsNotNone(window._main_window)
             self.assertEqual(window._main_window._toast._label.text(), "登录成功")
-            self.assertEqual(window._main_window.config_editor.build_config().tqsdk.username, "alice")
-            self.assertEqual(window._main_window.config_editor.build_config().tqsdk.password, "secret")
+            editor_config = window._main_window.config_editor.build_config()
+            self.assertEqual(editor_config.tqsdk.username_env, "TQSDK_USERNAME")
+            self.assertEqual(editor_config.tqsdk.password_env, "TQSDK_PASSWORD")
 
             next_window = LoginWindow()
             next_window.config_path.setText(str(config_path))
-            next_window._fill_remembered_credentials()
-            self.assertEqual(next_window.username.text(), "alice")
-            self.assertEqual(next_window.password.text(), "secret")
-            self.assertTrue(next_window.remember_me.isChecked())
+            self.assertEqual(next_window.username.text(), "")
+            self.assertEqual(next_window.password.text(), "")
+            self.assertFalse(hasattr(next_window, "remember_me"))
 
             window._main_window.close()
             next_window.close()
@@ -901,8 +912,10 @@ class GuiSmokeTests(unittest.TestCase):
         from PyQt6.QtCore import Qt
         from PyQt6.QtWidgets import QApplication
 
-        from optionsentry.config import load_config, parse_config
+        from optionsentry.config import load_config
+        from tests.helpers import parse_test_config as parse_config
         from optionsentry.gui.app import MainWindow
+        from optionsentry.gui.config_store import save_config
         from optionsentry.gui.credentials import CredentialResolution
 
         app = QApplication.instance() or QApplication([])
@@ -922,7 +935,9 @@ class GuiSmokeTests(unittest.TestCase):
                 CredentialResolution("u", "p", "TQSDK_USERNAME", "TQSDK_PASSWORD", "session"),
             )
 
-            main_window.config_editor.runtime_mode.setCurrentText("backtest")
+            main_window.config_editor.runtime_mode.setCurrentIndex(
+                main_window.config_editor.runtime_mode.findData("backtest")
+            )
             main_window.config_editor.backtest_start.setText("2026-06-01")
             main_window.config_editor.backtest_end.setText("2026-06-02")
             main_window.config_editor.strategies.item(1, 0).setCheckState(Qt.CheckState.Checked)
@@ -932,7 +947,7 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertEqual(main_window._toast._label.text(), "保存成功")
             self.assertEqual(main_window.config.runtime.mode, "backtest")
             self.assertEqual(load_config(config_path).runtime.mode, "backtest")
-            self.assertEqual(main_window.status_labels["mode"].text(), "backtest")
+            self.assertEqual(main_window.status_labels["mode"].text(), "回测")
             self.assertEqual(main_window.status_labels["strategies"].text(), "2")
             self.assertEqual(
                 main_window.active_view.filter_labels(),
@@ -943,22 +958,13 @@ class GuiSmokeTests(unittest.TestCase):
                 ("全部策略", "CP组合预警", "价差预警"),
             )
 
-            config_path.write_text(
-                "[runtime]\n"
-                'mode = "live"\n'
-                'price_basis = "last"\n\n'
-                "[[strategies]]\n"
-                'type = "cp_combo"\n'
-                "min_value = 0.01\n"
-                "max_value = inf\n",
-                encoding="utf-8",
-            )
+            save_config(config_path, config)
             main_window._reload_config()
             app.processEvents()
 
             self.assertEqual(main_window._toast._label.text(), "加载成功")
             self.assertEqual(main_window.config.runtime.mode, "live")
-            self.assertEqual(main_window.status_labels["mode"].text(), "live")
+            self.assertEqual(main_window.status_labels["mode"].text(), "实盘")
             self.assertEqual(main_window.status_labels["strategies"].text(), "1")
             self.assertEqual(main_window.active_view.filter_labels(), ("全部策略", "CP组合预警"))
             self.assertEqual(main_window.alert_view.filter_labels(), ("全部策略", "CP组合预警"))

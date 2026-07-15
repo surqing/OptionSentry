@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Callable
 
 from optionsentry.alerts import AlertEngine
+from optionsentry.config import ConfigError
 from optionsentry.data_sources.base import MarketDataSource
 from optionsentry.models import AlertEvent, ConditionEvaluation, Universe
 from optionsentry.notifiers import Notifier
-from optionsentry.strategies import CompiledStrategy, Strategy
+from optionsentry.strategies import CompiledStrategy, Strategy, StrategyCompilation
 from optionsentry.strategy_filters import apply_strategy_filter, validate_strategy_filters
 
 
@@ -70,27 +71,33 @@ class AlertRunner:
             self._emit_status("compiling")
             compiled_strategies, stream_universe = self._compile_strategies(universe)
             total_conditions = sum(strategy.condition_count for strategy in compiled_strategies)
+            compiled_strategy_count = len(
+                {(strategy.strategy_id, strategy.name) for strategy in compiled_strategies}
+            )
             self._emit_universe(stream_universe)
-            self._emit_compiled(len(compiled_strategies), total_conditions)
+            self._emit_compiled(compiled_strategy_count, total_conditions)
             if not compiled_strategies or total_conditions == 0:
                 self.logger.warning("No alert conditions after strategy filters and compilation.")
                 self._emit_status("empty_conditions")
                 return 0
             self.logger.info(
-                "Compiled alert strategies: strategies=%s total_conditions=%s",
+                "Compiled alert strategies: strategies=%s units=%s total_conditions=%s",
+                compiled_strategy_count,
                 len(compiled_strategies),
                 total_conditions,
             )
 
-            initialized = False
-            for snapshot in self.data_source.stream(stream_universe):
+            for snapshot, active_strategies, first_snapshot in self._stream_execution_batches(
+                compiled_strategies,
+                stream_universe,
+            ):
                 if self._should_stop():
                     self._emit_status("stopping")
                     break
-                changed_symbols = None if not initialized else snapshot.changed_symbols
+                changed_symbols = None if first_snapshot else snapshot.changed_symbols
                 started_at = time.perf_counter()
                 evaluations = []
-                for strategy in compiled_strategies:
+                for strategy in active_strategies:
                     evaluations.extend(strategy.evaluate(snapshot, changed_symbols))
                 compute_ms = (time.perf_counter() - started_at) * 1000
                 events = self.alert_engine.process(evaluations, snapshot.timestamp)
@@ -100,8 +107,6 @@ class AlertRunner:
                     alert_count += 1
                 self._flush_notifications()
                 cycle_count += 1
-                initialized = True
-
                 summary_cycle_count += 1
                 summary_alert_count += len(events)
                 summary_evaluation_count += len(evaluations)
@@ -190,8 +195,9 @@ class AlertRunner:
                     getattr(strategy, "filter_script", None) or "<none>",
                 )
                 continue
-            compiled = strategy.compile(filtered_universe)
-            if compiled.condition_count == 0:
+            compilation = strategy.compile(filtered_universe)
+            self._validate_compilation(strategy, compilation, filtered_universe)
+            if compilation.condition_count == 0:
                 self.logger.warning(
                     (
                         "Skipping strategy with no compiled conditions: strategy=%s script=%s "
@@ -211,14 +217,26 @@ class AlertRunner:
                 ),
                 strategy.name,
                 getattr(strategy, "filter_script", None) or "<none>",
-                compiled.condition_count,
+                compilation.condition_count,
                 len(filtered_universe.options),
                 len(filtered_universe.futures),
                 len(filtered_universe.price_symbols()),
             )
-            compiled_strategies.append(compiled)
+            for unit in compilation.units:
+                unsupported = unit.data_requirements.unsupported_reasons()
+                if unsupported:
+                    raise ConfigError(
+                        f"Strategy {strategy.id} requires unsupported market data: "
+                        f"{'; '.join(unsupported)}"
+                    )
+                compiled_strategies.append(unit)
             active_universes.append(filtered_universe)
-        stream_universe = _merge_universes(active_universes)
+        required_symbols = {
+            symbol
+            for compiled in compiled_strategies
+            for symbol in compiled.required_symbols
+        }
+        stream_universe = _merge_universes(active_universes).subset(required_symbols)
         self.logger.info(
             (
                 "Monitoring universe after strategy filters: strategies=%s options=%s "
@@ -230,6 +248,88 @@ class AlertRunner:
             len(stream_universe.price_symbols()),
         )
         return tuple(compiled_strategies), stream_universe
+
+    def _validate_compilation(
+        self,
+        strategy: Strategy,
+        compilation: StrategyCompilation,
+        universe: Universe,
+    ) -> None:
+        expected = (strategy.id, strategy.type_name, strategy.name)
+        actual = (
+            compilation.strategy_id,
+            compilation.strategy_type,
+            compilation.name,
+        )
+        if actual != expected:
+            raise ConfigError(
+                "Strategy compilation metadata mismatch: "
+                f"expected={expected!r} actual={actual!r}"
+            )
+        universe_symbols = set(universe.instruments)
+        for index, unit in enumerate(compilation.units):
+            unit_identity = (unit.strategy_id, unit.strategy_type, unit.name)
+            if unit_identity != expected:
+                raise ConfigError(
+                    f"Strategy {strategy.id} execution unit {index} metadata mismatch: "
+                    f"expected={expected!r} actual={unit_identity!r}"
+                )
+            if unit.condition_count <= 0:
+                raise ConfigError(
+                    f"Strategy {strategy.id} execution unit {index} must contain conditions."
+                )
+            if not str(unit.backtest_group).strip():
+                raise ConfigError(
+                    f"Strategy {strategy.id} execution unit {index} requires backtest_group."
+                )
+            if not unit.required_symbols:
+                raise ConfigError(
+                    f"Strategy {strategy.id} execution unit {index} requires symbols."
+                )
+            unknown_symbols = sorted(unit.required_symbols - universe_symbols)
+            if unknown_symbols:
+                raise ConfigError(
+                    f"Strategy {strategy.id} execution unit {index} requires symbols "
+                    f"outside its universe: {', '.join(unknown_symbols)}"
+                )
+
+    def _stream_execution_batches(
+        self,
+        compiled_strategies: tuple[CompiledStrategy, ...],
+        stream_universe: Universe,
+    ):
+        if getattr(self.data_source, "mode", "live") != "backtest":
+            first_snapshot = True
+            for snapshot in self.data_source.stream(stream_universe):
+                yield snapshot, compiled_strategies, first_snapshot
+                first_snapshot = False
+            return
+
+        groups: dict[str, list[CompiledStrategy]] = {}
+        for strategy in compiled_strategies:
+            groups.setdefault(strategy.backtest_group, []).append(strategy)
+        for index, group_name in enumerate(sorted(groups), start=1):
+            if self._should_stop():
+                return
+            group_strategies = tuple(groups[group_name])
+            symbols = {
+                symbol
+                for strategy in group_strategies
+                for symbol in strategy.required_symbols
+            }
+            group_universe = stream_universe.subset(symbols)
+            self.logger.info(
+                "Starting backtest execution group %s/%s: group=%s units=%s symbols=%s",
+                index,
+                len(groups),
+                group_name,
+                len(group_strategies),
+                len(symbols),
+            )
+            first_snapshot = True
+            for snapshot in self.data_source.stream(group_universe):
+                yield snapshot, group_strategies, first_snapshot
+                first_snapshot = False
 
     def _notify(self, event: AlertEvent) -> None:
         self.logger.warning("alert key=%s message=%s", event.evaluation.key, event.evaluation.message)

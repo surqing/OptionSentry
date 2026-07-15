@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import pkgutil
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, TypeVar
 
@@ -25,10 +27,34 @@ class ParsedAlertKey:
 
 def register_strategy(type_name: str) -> Callable[[_StrategyType], _StrategyType]:
     def decorator(cls: _StrategyType) -> _StrategyType:
+        from optionsentry.strategy_base import Strategy
+
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_]*", type_name):
+            raise ValueError(f"Invalid strategy type: {type_name}")
+        if not isinstance(cls, type) or not issubclass(cls, Strategy):
+            raise ValueError(f"Registered strategy must inherit Strategy: {type_name}")
+        if inspect.isabstract(cls):
+            raise ValueError(f"Registered strategy must implement compile: {type_name}")
+        if not str(getattr(cls, "display_name", "")).strip():
+            raise ValueError(f"Strategy display_name cannot be empty: {type_name}")
+        specs = tuple(getattr(cls, "parameter_specs", ()))
+        keys = [spec.key for spec in specs]
+        if len(keys) != len(set(keys)):
+            raise ValueError(f"Duplicate strategy parameter key: {type_name}")
+        for spec in specs:
+            if not re.fullmatch(r"[a-z][a-z0-9_]*", spec.key):
+                raise ValueError(f"Invalid strategy parameter key: {type_name}.{spec.key}")
+            if spec.kind == "enum" and not spec.choices:
+                raise ValueError(f"Enum strategy parameter requires choices: {type_name}.{spec.key}")
+            if len(spec.choices) != len(set(spec.choices)):
+                raise ValueError(f"Duplicate enum choice: {type_name}.{spec.key}")
+            if spec.choice_labels and len(spec.choice_labels) != len(spec.choices):
+                raise ValueError(f"Enum choice labels must match choices: {type_name}.{spec.key}")
         existing = STRATEGY_REGISTRY.get(type_name)
         if existing is not None and existing is not cls:
             raise ValueError(f"Duplicate strategy type: {type_name}")
         cls.type_name = type_name
+        cls.validate_parameters(cls.default_parameters())
         STRATEGY_REGISTRY[type_name] = cls
         return cls
 

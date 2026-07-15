@@ -3,14 +3,20 @@ from __future__ import annotations
 import logging
 import tempfile
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
 from optionsentry.alerts import AlertEngine
 from optionsentry.config import ConfigError
-from optionsentry.models import AlertEvent, MarketSnapshot, Universe
+from optionsentry.models import AlertEvent, InstrumentMeta, MarketSnapshot, Universe
 from optionsentry.runner import AlertRunner, RunnerCallbacks
+from optionsentry.strategy_base import (
+    CompiledStrategy,
+    DataRequirements,
+    Strategy,
+    StrategyCompilation,
+)
 from optionsentry.strategies import CPComboStrategy
 from tests.helpers import sample_universe, snapshot
 
@@ -32,6 +38,25 @@ class FakeDataSource:
         self.stream_universe = universe
         self.stream_calls += 1
         yield from self.snapshots
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@dataclass
+class FakeBacktestDataSource:
+    universe: Universe
+    mode: str = "backtest"
+    stream_universes: list[Universe] = field(default_factory=list)
+    closed: bool = False
+
+    def discover_universe(self) -> Universe:
+        return self.universe
+
+    def stream(self, universe: Universe) -> Iterator[MarketSnapshot]:
+        self.stream_universes.append(universe)
+        return
+        yield
 
     def close(self) -> None:
         self.closed = True
@@ -75,6 +100,153 @@ class CapturingLogHandler(logging.Handler):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_backtest_streams_exact_execution_groups(self) -> None:
+        base = sample_universe()
+        instruments = dict(base.instruments)
+        instruments.update(
+            {
+                "DCE.m2609": InstrumentMeta("DCE.m2609", "FUTURE"),
+                "DCE.m2609C3000": InstrumentMeta(
+                    "DCE.m2609C3000",
+                    "OPTION",
+                    underlying_symbol="DCE.m2609",
+                    strike_price=3000.0,
+                    option_class="CALL",
+                    exercise_year=2026,
+                    exercise_month=9,
+                ),
+                "DCE.m2609P3000": InstrumentMeta(
+                    "DCE.m2609P3000",
+                    "OPTION",
+                    underlying_symbol="DCE.m2609",
+                    strike_price=3000.0,
+                    option_class="PUT",
+                    exercise_year=2026,
+                    exercise_month=9,
+                ),
+            }
+        )
+        data_source = FakeBacktestDataSource(Universe(instruments=instruments))
+        runner = AlertRunner(
+            data_source=data_source,
+            strategies=(CPComboStrategy(min_value=0.01, max_value=float("inf")),),
+            alert_engine=AlertEngine(),
+            notifier=CapturingNotifier([]),
+            logger=_logger("tests.runner.backtest_groups"),
+        )
+
+        runner.run()
+
+        self.assertEqual(len(data_source.stream_universes), 2)
+        grouped_options = {
+            frozenset(option.symbol for option in universe.options)
+            for universe in data_source.stream_universes
+        }
+        self.assertEqual(
+            grouped_options,
+            {
+                frozenset(
+                    {
+                        "SHFE.AU2608C600",
+                        "SHFE.AU2608P600",
+                        "SHFE.AU2608C620",
+                        "SHFE.AU2608P620",
+                    }
+                ),
+                frozenset({"DCE.M2609C3000", "DCE.M2609P3000"}),
+            },
+        )
+        self.assertTrue(
+            all(len(universe.futures) == 1 for universe in data_source.stream_universes)
+        )
+        self.assertTrue(data_source.closed)
+
+    def test_runner_rejects_unsupported_strategy_data_requirements(self) -> None:
+        universe = sample_universe()
+
+        class UnsupportedUnit(CompiledStrategy):
+            strategy_id = "unsupported"
+            strategy_type = "unsupported"
+            name = "不支持的数据"
+            backtest_group = "test"
+            data_requirements = DataRequirements(
+                quote_fields=frozenset({"bid_price1"})
+            )
+
+            @property
+            def condition_count(self) -> int:
+                return 1
+
+            @property
+            def required_symbols(self) -> frozenset[str]:
+                return frozenset({"SHFE.AU2608"})
+
+            def evaluate(self, snapshot, changed_symbols=None):
+                return []
+
+        class UnsupportedStrategy(Strategy):
+            type_name = "unsupported"
+            id = "unsupported"
+            name = "不支持的数据"
+
+            def compile(self, universe: Universe) -> StrategyCompilation:
+                return StrategyCompilation(
+                    strategy_id=self.id,
+                    strategy_type=self.type_name,
+                    name=self.name,
+                    units=(UnsupportedUnit(),),
+                )
+
+        data_source = FakeDataSource(universe, ())
+        runner = AlertRunner(
+            data_source=data_source,
+            strategies=(UnsupportedStrategy(),),
+            alert_engine=AlertEngine(),
+            notifier=CapturingNotifier([]),
+            logger=_logger("tests.runner.data_requirements"),
+        )
+
+        with self.assertRaisesRegex(
+            ConfigError,
+            "requires unsupported market data: quote fields: bid_price1",
+        ):
+            runner.run()
+
+        self.assertTrue(data_source.closed)
+
+    def test_runner_rejects_invalid_compilation_metadata(self) -> None:
+        universe = sample_universe()
+
+        class InvalidCompilationStrategy(Strategy):
+            type_name = "invalid_compilation"
+            id = "invalid_compilation"
+            name = "无效编译"
+
+            def compile(self, universe: Universe) -> StrategyCompilation:
+                return StrategyCompilation(
+                    strategy_id="wrong_id",
+                    strategy_type=self.type_name,
+                    name=self.name,
+                    units=(),
+                )
+
+        data_source = FakeDataSource(universe, ())
+        runner = AlertRunner(
+            data_source=data_source,
+            strategies=(InvalidCompilationStrategy(),),
+            alert_engine=AlertEngine(),
+            notifier=CapturingNotifier([]),
+            logger=_logger("tests.runner.invalid_compilation"),
+        )
+
+        with self.assertRaisesRegex(
+            ConfigError,
+            "Strategy compilation metadata mismatch",
+        ):
+            runner.run()
+
+        self.assertTrue(data_source.closed)
+
     def test_runner_validates_filter_scripts_before_discovery(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             data_source = FakeDataSource(sample_universe(), ())

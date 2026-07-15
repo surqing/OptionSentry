@@ -20,12 +20,15 @@ class GuiFilterValidationTests(unittest.TestCase):
         app = QApplication.instance() or QApplication([])
         config = parse_config(
             {
+                "schema_version": 1,
                 "strategies": [
                     {
+                        "id": "cp",
                         "type": "cp_combo",
-                        "min_value": 0.01,
-                        "max_value": float("inf"),
-                        "filter_script": "missing.py",
+                        "name": "CP",
+                        "enabled": True,
+                        "parameters": {"min_value": 0.01, "max_value": float("inf")},
+                        "filter": {"script": "missing.py", "entrypoint": "accept"},
                     }
                 ]
             }

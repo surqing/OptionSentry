@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Any, ClassVar, Mapping
 
 from optionsentry.formatting import format_key_bound, format_key_number, format_key_range
 from optionsentry.models import ConditionEvaluation, InstrumentMeta, MarketSnapshot, Universe
@@ -11,9 +11,13 @@ from optionsentry.strategy_base import (
     EmailPresentation,
     MetricColumn,
     Strategy,
+    StrategyCompilation,
+    StrategyParameterSpec,
     add_condition,
     affected_condition_ids,
     in_alert_range,
+    normalize_strategy_parameters,
+    validate_alert_range,
     valid_price,
 )
 from optionsentry.strategy_registry import register_strategy
@@ -36,36 +40,29 @@ class CPComboStrategy(Strategy):
         MetricColumn(CALL_MONEYNESS_METRIC),
         MetricColumn(PUT_MONEYNESS_METRIC),
     )
+    parameter_specs: ClassVar[tuple[StrategyParameterSpec, ...]] = (
+        StrategyParameterSpec("min_value", "最小值", "float", default=0.01),
+        StrategyParameterSpec("max_value", "最大值", "float", default=math.inf),
+    )
 
     min_value: float
     max_value: float
+    id: str = "cp_combo"
     name: str = "cp_combo"
     filter_script: str | None = None
     filter_function: str = "accept"
     filter_scope: str = "options"
 
     @classmethod
-    def default_range(cls) -> tuple[float, float]:
-        return 0.01, math.inf
-
-    @classmethod
-    def expand_ranges(
-        cls,
-        *,
-        explicit_range: tuple[float, float] | None,
-        threshold: float | None,
-    ) -> tuple[tuple[float, float], ...]:
-        if explicit_range is not None:
-            return (explicit_range,)
-        if threshold is None:
-            raise ValueError(f"Strategy {cls.type_name} requires min_value and max_value.")
-        return ((threshold, math.inf), (-math.inf, -threshold))
+    def validate_parameters(cls, parameters: Mapping[str, Any]) -> dict[str, Any]:
+        normalized = normalize_strategy_parameters(cls.type_name, cls.parameter_specs, parameters)
+        return validate_alert_range(cls.type_name, normalized)
 
     @classmethod
     def make_key(
         cls,
         *,
-        name: str,
+        strategy_id: str,
         group_text: str,
         strike: float,
         call_symbol: str,
@@ -74,7 +71,7 @@ class CPComboStrategy(Strategy):
         max_value: float,
     ) -> str:
         return (
-            f"{name}:{group_text}:K={format_key_number(strike)}:{call_symbol}:{put_symbol}:"
+            f"{strategy_id}:{group_text}:K={format_key_number(strike)}:{call_symbol}:{put_symbol}:"
             f"R={format_key_bound(min_value)}..{format_key_bound(max_value)}"
         )
 
@@ -113,7 +110,7 @@ class CPComboStrategy(Strategy):
     def evaluate(self, snapshot: MarketSnapshot, universe: Universe) -> list[ConditionEvaluation]:
         return self.compile(universe).evaluate(snapshot)
 
-    def compile(self, universe: Universe) -> CompiledStrategy:
+    def compile(self, universe: Universe) -> StrategyCompilation:
         return _compile_cp_combo(self, universe)
 
 
@@ -130,7 +127,10 @@ class _CPComboCondition:
 
 @dataclass
 class _CompiledCPComboStrategy(CompiledStrategy):
+    strategy_id: str
+    strategy_type: str
     name: str
+    backtest_group: str
     min_value: float
     max_value: float
     conditions: tuple[_CPComboCondition, ...]
@@ -139,6 +139,10 @@ class _CompiledCPComboStrategy(CompiledStrategy):
     @property
     def condition_count(self) -> int:
         return len(self.conditions)
+
+    @property
+    def required_symbols(self) -> frozenset[str]:
+        return frozenset(self.condition_ids_by_symbol)
 
     def evaluate(
         self,
@@ -195,10 +199,11 @@ class _CompiledCPComboStrategy(CompiledStrategy):
         return evaluations
 
 
-def _compile_cp_combo(strategy: CPComboStrategy, universe: Universe) -> _CompiledCPComboStrategy:
-    conditions: list[_CPComboCondition] = []
-    condition_ids_by_symbol: dict[str, set[int]] = {}
+def _compile_cp_combo(strategy: CPComboStrategy, universe: Universe) -> StrategyCompilation:
+    units: list[CompiledStrategy] = []
     for group_key, options in universe.option_groups().items():
+        conditions: list[_CPComboCondition] = []
+        condition_ids_by_symbol: dict[str, set[int]] = {}
         calls = _options_by_strike(options, "CALL")
         puts = _options_by_strike(options, "PUT")
         for strike in sorted(set(calls) & set(puts)):
@@ -207,7 +212,7 @@ def _compile_cp_combo(strategy: CPComboStrategy, universe: Universe) -> _Compile
             group_text = group_key.as_text()
             condition = _CPComboCondition(
                 key=CPComboStrategy.make_key(
-                    name=strategy.name,
+                    strategy_id=strategy.id,
                     group_text=group_text,
                     strike=strike,
                     call_symbol=call.symbol,
@@ -228,12 +233,24 @@ def _compile_cp_combo(strategy: CPComboStrategy, universe: Universe) -> _Compile
                 condition,
                 (call.symbol, put.symbol, group_key.underlying_symbol),
             )
-    return _CompiledCPComboStrategy(
+        if conditions:
+            units.append(
+                _CompiledCPComboStrategy(
+                    strategy_id=strategy.id,
+                    strategy_type=strategy.type_name,
+                    name=strategy.name,
+                    backtest_group=group_key.as_text(),
+                    min_value=strategy.min_value,
+                    max_value=strategy.max_value,
+                    conditions=tuple(conditions),
+                    condition_ids_by_symbol=condition_ids_by_symbol,
+                )
+            )
+    return StrategyCompilation(
+        strategy_id=strategy.id,
+        strategy_type=strategy.type_name,
         name=strategy.name,
-        min_value=strategy.min_value,
-        max_value=strategy.max_value,
-        conditions=tuple(conditions),
-        condition_ids_by_symbol=condition_ids_by_symbol,
+        units=tuple(units),
     )
 
 

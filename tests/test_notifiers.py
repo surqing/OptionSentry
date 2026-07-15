@@ -10,7 +10,8 @@ from email import message_from_string
 from pathlib import Path
 from unittest.mock import patch
 
-from optionsentry.config import EmailConfig, parse_config
+from optionsentry.config import EmailConfig
+from tests.helpers import parse_test_config as parse_config
 from optionsentry.models import AlertEvent, ConditionEvaluation
 from optionsentry.notifiers import (
     CompositeNotifier,
@@ -244,7 +245,7 @@ class NotifierTests(unittest.TestCase):
                         "kind": "console",
                         "alert_log_path": str(Path(tmpdir) / "alerts.jsonl"),
                     },
-                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
             notifier = build_notifier(config)
@@ -268,7 +269,7 @@ class NotifierTests(unittest.TestCase):
                         },
                         "alert_log_path": str(Path(tmpdir) / "disabled.jsonl"),
                     },
-                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
             disabled_notifier = build_notifier(disabled_config)
@@ -287,7 +288,7 @@ class NotifierTests(unittest.TestCase):
                         },
                         "alert_log_path": str(Path(tmpdir) / "file_only.jsonl"),
                     },
-                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
             file_notifier = build_notifier(file_config)
@@ -311,7 +312,7 @@ class NotifierTests(unittest.TestCase):
                             "alert_interval_seconds": 0,
                         },
                     },
-                    "strategies": [{"type": "cp_combo", "threshold": 0.01}],
+                    "strategies": [{"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")}],
                 }
             )
             email_notifier = build_notifier(email_config)

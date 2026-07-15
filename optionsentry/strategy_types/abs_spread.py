@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from itertools import combinations
-from typing import ClassVar
+from typing import Any, ClassVar, Mapping
 
 from optionsentry.formatting import format_key_bound, format_key_number, format_key_range
 from optionsentry.models import ConditionEvaluation, MarketSnapshot, Universe
@@ -12,9 +12,13 @@ from optionsentry.strategy_base import (
     EmailPresentation,
     MetricColumn,
     Strategy,
+    StrategyCompilation,
+    StrategyParameterSpec,
     add_condition,
     affected_condition_ids,
     in_alert_range,
+    normalize_strategy_parameters,
+    validate_alert_range,
     valid_price,
 )
 from optionsentry.strategy_registry import register_strategy
@@ -35,23 +39,29 @@ class AbsSpreadStrategy(Strategy):
         MetricColumn(SPREAD_B_MONEYNESS_METRIC),
         MetricColumn(SPREAD_AVG_MONEYNESS_METRIC, width=115),
     )
+    parameter_specs: ClassVar[tuple[StrategyParameterSpec, ...]] = (
+        StrategyParameterSpec("min_value", "最小值", "float", default=-math.inf),
+        StrategyParameterSpec("max_value", "最大值", "float", default=0.1),
+    )
 
     min_value: float
     max_value: float
+    id: str = "abs_spread"
     name: str = "abs_spread"
     filter_script: str | None = None
     filter_function: str = "accept"
     filter_scope: str = "options"
 
     @classmethod
-    def default_range(cls) -> tuple[float, float]:
-        return -math.inf, 0.1
+    def validate_parameters(cls, parameters: Mapping[str, Any]) -> dict[str, Any]:
+        normalized = normalize_strategy_parameters(cls.type_name, cls.parameter_specs, parameters)
+        return validate_alert_range(cls.type_name, normalized)
 
     @classmethod
     def make_key(
         cls,
         *,
-        name: str,
+        strategy_id: str,
         group_text: str,
         option_class: str,
         first_symbol: str,
@@ -60,7 +70,7 @@ class AbsSpreadStrategy(Strategy):
         max_value: float,
     ) -> str:
         return (
-            f"{name}:{group_text}:{option_class}:{first_symbol}:{second_symbol}:"
+            f"{strategy_id}:{group_text}:{option_class}:{first_symbol}:{second_symbol}:"
             f"R={format_key_bound(min_value)}..{format_key_bound(max_value)}"
         )
 
@@ -94,7 +104,7 @@ class AbsSpreadStrategy(Strategy):
     def evaluate(self, snapshot: MarketSnapshot, universe: Universe) -> list[ConditionEvaluation]:
         return self.compile(universe).evaluate(snapshot)
 
-    def compile(self, universe: Universe) -> CompiledStrategy:
+    def compile(self, universe: Universe) -> StrategyCompilation:
         return _compile_abs_spread(self, universe)
 
 
@@ -113,7 +123,10 @@ class _AbsSpreadCondition:
 
 @dataclass
 class _CompiledAbsSpreadStrategy(CompiledStrategy):
+    strategy_id: str
+    strategy_type: str
     name: str
+    backtest_group: str
     min_value: float
     max_value: float
     conditions: tuple[_AbsSpreadCondition, ...]
@@ -122,6 +135,10 @@ class _CompiledAbsSpreadStrategy(CompiledStrategy):
     @property
     def condition_count(self) -> int:
         return len(self.conditions)
+
+    @property
+    def required_symbols(self) -> frozenset[str]:
+        return frozenset(self.condition_ids_by_symbol)
 
     def evaluate(
         self,
@@ -187,10 +204,11 @@ class _CompiledAbsSpreadStrategy(CompiledStrategy):
         return evaluations
 
 
-def _compile_abs_spread(strategy: AbsSpreadStrategy, universe: Universe) -> _CompiledAbsSpreadStrategy:
-    conditions: list[_AbsSpreadCondition] = []
-    condition_ids_by_symbol: dict[str, set[int]] = {}
+def _compile_abs_spread(strategy: AbsSpreadStrategy, universe: Universe) -> StrategyCompilation:
+    units: list[CompiledStrategy] = []
     for group_key, options in universe.option_groups().items():
+        conditions: list[_AbsSpreadCondition] = []
+        condition_ids_by_symbol: dict[str, set[int]] = {}
         for option_class in ("CALL", "PUT"):
             class_options = [
                 option
@@ -206,7 +224,7 @@ def _compile_abs_spread(strategy: AbsSpreadStrategy, universe: Universe) -> _Com
                 group_text = group_key.as_text()
                 condition = _AbsSpreadCondition(
                     key=AbsSpreadStrategy.make_key(
-                        name=strategy.name,
+                        strategy_id=strategy.id,
                         group_text=group_text,
                         option_class=option_class,
                         first_symbol=first.symbol,
@@ -229,12 +247,24 @@ def _compile_abs_spread(strategy: AbsSpreadStrategy, universe: Universe) -> _Com
                     condition,
                     (first.symbol, second.symbol, group_key.underlying_symbol),
                 )
-    return _CompiledAbsSpreadStrategy(
+        if conditions:
+            units.append(
+                _CompiledAbsSpreadStrategy(
+                    strategy_id=strategy.id,
+                    strategy_type=strategy.type_name,
+                    name=strategy.name,
+                    backtest_group=group_key.as_text(),
+                    min_value=strategy.min_value,
+                    max_value=strategy.max_value,
+                    conditions=tuple(conditions),
+                    condition_ids_by_symbol=condition_ids_by_symbol,
+                )
+            )
+    return StrategyCompilation(
+        strategy_id=strategy.id,
+        strategy_type=strategy.type_name,
         name=strategy.name,
-        min_value=strategy.min_value,
-        max_value=strategy.max_value,
-        conditions=tuple(conditions),
-        condition_ids_by_symbol=condition_ids_by_symbol,
+        units=tuple(units),
     )
 
 

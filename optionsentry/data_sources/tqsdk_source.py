@@ -26,6 +26,10 @@ class TqSdkDataSource:
     stop_requested: Callable[[], bool] | None = None
     _live_api: Any | None = field(default=None, init=False, repr=False)
 
+    @property
+    def mode(self) -> str:
+        return self.config.runtime.mode
+
     def discover_universe(self) -> Universe:
         api = self._create_api()
         keep_api_for_live = False
@@ -89,21 +93,7 @@ class TqSdkDataSource:
         if self.config.runtime.mode == "live":
             yield from self._stream_live(universe)
             return
-        groups = universe.strategy_groups()
-        self.logger.info(
-            "Backtest will run %s strategy group(s).",
-            len(groups),
-        )
-        for index, group in enumerate(groups, start=1):
-            if self._should_stop():
-                return
-            self.logger.info(
-                "Starting backtest group %s/%s with %s symbols.",
-                index,
-                len(groups),
-                len(group.price_symbols()),
-            )
-            yield from self._stream_backtest_universe(group)
+        yield from self._stream_backtest_universe(universe)
 
     def close(self) -> None:
         self._close_live_api()
@@ -111,17 +101,17 @@ class TqSdkDataSource:
     def _discover_option_symbols(self, api: Any) -> list[str]:
         universe_config = self.config.universe
         if universe_config.mode == "all":
-            return self._discover_active_symbols(api, "OPTION", universe_config.exchange_ids)
+            return self._discover_active_symbols(api, "OPTION", universe_config.exchanges)
 
         option_symbols = self._discover_active_symbols(api, "OPTION")
-        if universe_config.mode == "指定模式":
-            included_symbols = set(_filter_symbols_by_terms(option_symbols, universe_config.only_do))
-            excluded_symbols = set(_filter_symbols_by_terms(option_symbols, universe_config.not_do))
+        if universe_config.mode == "include":
+            included_symbols = set(_filter_symbols_by_terms(option_symbols, universe_config.include))
+            excluded_symbols = set(_filter_symbols_by_terms(option_symbols, universe_config.exclude))
             symbols = sorted(included_symbols - excluded_symbols)
             self.logger.info(
-                "Applied universe specified filter: only_do=%s not_do=%s options %s -> %s.",
-                universe_config.only_do,
-                universe_config.not_do,
+                "Applied universe include filter: include=%s exclude=%s options %s -> %s.",
+                universe_config.include,
+                universe_config.exclude,
                 len(option_symbols),
                 len(symbols),
             )
@@ -179,8 +169,8 @@ class TqSdkDataSource:
                     "!!! batch=%s/%s batch_size=%s symbols_in_batch=%s\n"
                     "!!! first_symbols=%s\n"
                     "!!! last_symbols=%s\n"
-                    "!!! 提示：请检查 only_do/not_do 是否足够收窄；"
-                    "如果必须扫描大量合约，可尝试调小 datasource.tqsdk.symbol_info_batch_size。\n"
+                    "!!! 提示：请检查 universe.include/exclude 是否足够收窄；"
+                    "如果必须扫描大量合约，可尝试调小 data_source.tqsdk.symbol_info_batch_size。\n"
                     "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
                     batch_index,
                     len(batches),
@@ -1070,8 +1060,8 @@ def _validate_live_subscription_size(symbols: list[str]) -> None:
         "预处理后需要订阅的合约数量过多，已停止本次预警系统启动。\n\n"
         f"当前需要订阅 {len(symbols)} 个合约，最大允许 {MAX_LIVE_SUBSCRIPTION_SYMBOLS} 个。\n\n"
         "请通过以下方式降低订阅数：\n"
-        "- 将合约范围模式从 all 改为指定模式，只填写需要监控的品种或合约关键字。\n"
-        "- 缩小 exchange_ids，只扫描必要交易所。\n"
+        "- 将 universe.mode 从 all 改为 include，只填写需要监控的品种或合约关键字。\n"
+        "- 缩小 exchanges，只扫描必要交易所。\n"
         "- 提高 min_volume 或 min_open_interest，过滤低流动性期权。\n"
         "- 减少要监控的到期月份或标的范围。"
     )

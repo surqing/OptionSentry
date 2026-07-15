@@ -3,7 +3,8 @@ from __future__ import annotations
 import math
 import unittest
 
-from optionsentry.config import StrategyConfig, parse_config, strategy_display_name
+from optionsentry.config import ConfigError, StrategyConfig, parse_config as parse_strict_config, strategy_display_name
+from tests.helpers import parse_test_config as parse_config
 from optionsentry.models import InstrumentMeta, Universe
 from optionsentry.strategies import (
     CALL_MONEYNESS_METRIC,
@@ -61,8 +62,15 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(evaluation.fields["second_strike"], "620.0")
 
     def test_strategy_display_name_defaults_to_chinese_label(self) -> None:
-        cp_config = StrategyConfig(type="cp_combo", min_value=0.01, max_value=float("inf"))
-        spread_config = StrategyConfig(type="abs_spread", min_value=float("-inf"), max_value=0.1)
+        config = parse_config(
+            {
+                "strategies": [
+                    {"type": "cp_combo", "min_value": 0.01, "max_value": float("inf")},
+                    {"type": "abs_spread", "min_value": float("-inf"), "max_value": 0.1},
+                ]
+            }
+        )
+        cp_config, spread_config = config.strategies
 
         self.assertEqual(strategy_display_name(cp_config), "CP组合预警")
         self.assertEqual(strategy_display_name(spread_config), "价差预警")
@@ -70,7 +78,13 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(build_strategy(spread_config).name, "价差预警")
 
     def test_strategy_display_name_preserves_explicit_name(self) -> None:
-        config = StrategyConfig(type="cp_combo", min_value=0.01, max_value=float("inf"), name="custom")
+        config = StrategyConfig(
+            id="custom_cp",
+            type="cp_combo",
+            name="custom",
+            enabled=True,
+            parameters={"min_value": 0.01, "max_value": float("inf")},
+        )
 
         self.assertEqual(strategy_display_name(config), "custom")
         self.assertEqual(build_strategy(config).name, "custom")
@@ -99,17 +113,23 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(strategy.filter_function, "accept")
         self.assertEqual(strategy.filter_scope, "options")
 
-    def test_strategy_filter_scope_only_supports_options(self) -> None:
-        with self.assertRaisesRegex(ValueError, "filter_scope"):
-            parse_config(
+    def test_strategy_filter_rejects_removed_scope_field(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "scope"):
+            parse_strict_config(
                 {
+                    "schema_version": 1,
                     "strategies": [
                         {
+                            "id": "cp_combo",
                             "type": "cp_combo",
-                            "min_value": 0.01,
-                            "max_value": float("inf"),
-                            "filter_script": "filters/gold.py",
-                            "filter_scope": "all",
+                            "parameters": {
+                                "min_value": 0.01,
+                                "max_value": float("inf"),
+                            },
+                            "filter": {
+                                "script": "filters/gold.py",
+                                "scope": "all",
+                            },
                         }
                     ]
                 }
@@ -276,24 +296,21 @@ class StrategyTests(unittest.TestCase):
         self.assertFalse(any(item.active for item in cp_evaluations))
         self.assertFalse(any(item.active for item in spread_evaluations))
 
-    def test_legacy_threshold_config_expands_to_warning_ranges(self) -> None:
-        config = parse_config(
-            {
-                "strategies": [
-                    {"type": "cp_combo", "threshold": 0.01},
-                    {"type": "abs_spread", "threshold": 0.1},
-                ]
-            }
-        )
-
-        self.assertEqual(
-            [(strategy.type, strategy.min_value, strategy.max_value) for strategy in config.strategies],
-            [
-                ("cp_combo", 0.01, float("inf")),
-                ("cp_combo", float("-inf"), -0.01),
-                ("abs_spread", float("-inf"), 0.1),
-            ],
-        )
+    def test_legacy_threshold_config_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "threshold"):
+            parse_strict_config(
+                {
+                    "schema_version": 1,
+                    "strategies": [
+                        {
+                            "id": "cp_combo",
+                            "type": "cp_combo",
+                            "threshold": 0.01,
+                            "parameters": {},
+                        }
+                    ],
+                }
+            )
 
 
 if __name__ == "__main__":

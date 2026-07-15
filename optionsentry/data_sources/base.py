@@ -6,6 +6,10 @@ from optionsentry.models import MarketSnapshot, Universe
 
 
 class MarketDataSource(Protocol):
+    @property
+    def mode(self) -> str:
+        ...
+
     def discover_universe(self) -> Universe:
         ...
 

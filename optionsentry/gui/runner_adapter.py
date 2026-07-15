@@ -58,7 +58,7 @@ def build_gui_runner(config: AppConfig, signals: GuiRunSignals, config_path: str
     )
     runner = AlertRunner(
         data_source=data_source,
-        strategies=tuple(build_strategy(strategy) for strategy in config.selected_strategies),
+        strategies=tuple(build_strategy(strategy) for strategy in config.enabled_strategies),
         alert_engine=AlertEngine(alert_on_first_match=config.runtime.alert_on_first_match),
         notifier=build_notifier(config),
         logger=logger,

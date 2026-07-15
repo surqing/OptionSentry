@@ -30,14 +30,6 @@ def resolve_tqsdk_credentials(
     password_env = config.tqsdk.password_env
 
     if not username and not password:
-        if config.tqsdk.username and config.tqsdk.password:
-            return CredentialResolution(
-                username=config.tqsdk.username,
-                password=config.tqsdk.password,
-                username_env=username_env,
-                password_env=password_env,
-                source="config",
-            )
         env_username = environ.get(username_env, "")
         env_password = environ.get(password_env, "")
         if not env_username or not env_password:
@@ -66,7 +58,7 @@ def apply_session_credentials(
     credentials: CredentialResolution,
     environ: MutableMapping[str, str] | None = None,
 ) -> None:
-    if credentials.source not in {"session", "config"}:
+    if credentials.source != "session":
         return
     environ = os.environ if environ is None else environ
     environ[credentials.username_env] = credentials.username

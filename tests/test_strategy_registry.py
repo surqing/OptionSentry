@@ -6,8 +6,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from optionsentry.config import StrategyConfig, parse_config, strategy_type_display_name
-from optionsentry.strategy_base import Strategy
+from optionsentry.config import StrategyConfig, strategy_type_display_name
+from tests.helpers import parse_test_config as parse_config
+from optionsentry.strategy_base import Strategy, StrategyParameterSpec
 from optionsentry.strategy_registry import (
     ParsedAlertKey,
     STRATEGY_REGISTRY,
@@ -26,7 +27,13 @@ class StrategyRegistryTests(unittest.TestCase):
         self.assertEqual(get_strategy_class("abs_spread").display_name, "价差预警")
 
     def test_create_strategy_uses_registered_class(self) -> None:
-        config = StrategyConfig(type="cp_combo", min_value=0.01, max_value=float("inf"))
+        config = StrategyConfig(
+            id="cp_combo",
+            type="cp_combo",
+            name="CP组合预警",
+            enabled=True,
+            parameters={"min_value": 0.01, "max_value": float("inf")},
+        )
 
         strategy = create_strategy(config)
 
@@ -37,32 +44,51 @@ class StrategyRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported strategy type: missing"):
             get_strategy_class("missing")
 
-    def test_config_display_and_range_expansion_are_registry_driven(self) -> None:
+    def test_abstract_strategy_is_rejected_during_registration(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must implement compile"):
+
+            @register_strategy("abstract_strategy")
+            class AbstractStrategy(Strategy):
+                display_name = "抽象策略"
+
+    def test_enum_choice_labels_must_match_choices(self) -> None:
+        with self.assertRaisesRegex(ValueError, "choice labels must match"):
+
+            @register_strategy("invalid_enum_labels")
+            class InvalidEnumLabelsStrategy(Strategy):
+                display_name = "无效枚举标签"
+                parameter_specs = (
+                    StrategyParameterSpec(
+                        "direction",
+                        "方向",
+                        "enum",
+                        default="both",
+                        choices=("both", "call"),
+                        choice_labels=("双向",),
+                    ),
+                )
+
+                def compile(self, universe):
+                    raise NotImplementedError
+
+    def test_config_display_and_parameters_are_registry_driven(self) -> None:
         @register_strategy("registry_test")
         class RegistryTestStrategy(Strategy):
             display_name = "注册测试策略"
             display_order = 999
+            parameter_specs = (
+                StrategyParameterSpec("window", "窗口", "int", default=5, minimum=1),
+            )
 
-            @classmethod
-            def expand_ranges(
-                cls,
-                *,
-                explicit_range: tuple[float, float] | None,
-                threshold: float | None,
-            ) -> tuple[tuple[float, float], ...]:
-                if explicit_range is not None:
-                    return (explicit_range,)
-                return ((1.0, 2.0), (3.0, 4.0))
+            def compile(self, universe):
+                raise NotImplementedError
 
         try:
             self.assertEqual(strategy_type_display_name("registry_test"), "注册测试策略")
             parsed = parse_config(
-                {"strategies": [{"type": "registry_test", "threshold": 0.5}]}
+                {"strategies": [{"type": "registry_test", "parameters": {"window": 7}}]}
             )
-            self.assertEqual(
-                [(item.min_value, item.max_value) for item in parsed.strategies],
-                [(1.0, 2.0), (3.0, 4.0)],
-            )
+            self.assertEqual(parsed.strategies[0].parameters, {"window": 7})
         finally:
             STRATEGY_REGISTRY.pop("registry_test", None)
 
@@ -120,6 +146,7 @@ class StrategyRegistryTests(unittest.TestCase):
                         "class DemoStrategy(Strategy):",
                         "    display_name = '演示策略'",
                         "    display_order = 1",
+                        "    def compile(self, universe): raise NotImplementedError",
                     )
                 ),
                 encoding="utf-8",
@@ -145,10 +172,15 @@ class StrategyRegistryTests(unittest.TestCase):
         script = "\n".join(
             (
                 "from optionsentry.strategy_registry import register_strategy",
+                "from optionsentry.strategy_base import Strategy",
                 "@register_strategy('duplicate')",
-                "class First: pass",
-                "@register_strategy('duplicate')",
-                "class Second: pass",
+                "class First(Strategy):",
+                "    display_name = 'Duplicate'",
+                "    def compile(self, universe): raise NotImplementedError",
+                "class Second(Strategy):",
+                "    display_name = 'Duplicate 2'",
+                "    def compile(self, universe): raise NotImplementedError",
+                "register_strategy('duplicate')(Second)",
             )
         )
 
