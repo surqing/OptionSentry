@@ -163,6 +163,31 @@ function Invoke-CodeSigning {
     Write-SignatureStatus -ExePath $ExePath
 }
 
+function Compress-ArchiveWithRetry {
+    param(
+        [string]$SourcePath,
+        [string]$DestinationPath,
+        [int]$MaxAttempts = 5
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            Compress-Archive -LiteralPath $SourcePath -DestinationPath $DestinationPath -Force
+            return
+        }
+        catch {
+            if ($attempt -eq $MaxAttempts) {
+                throw
+            }
+            Write-Warning "Archive creation attempt $attempt failed: $($_.Exception.Message) Retrying..."
+            if (Test-Path -LiteralPath $DestinationPath) {
+                Remove-Item -LiteralPath $DestinationPath -Force
+            }
+            Start-Sleep -Seconds 2
+        }
+    }
+}
+
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
@@ -266,7 +291,7 @@ Remove-WorkspaceItem -Root $Root -RelativePath "dist\$PackageBaseName.zip.sha256
 New-Item -ItemType Directory -Path $StagingPath | Out-Null
 Get-ChildItem -LiteralPath $OnedirPath -Force |
     Copy-Item -Destination $StagingPath -Recurse -Force
-Compress-Archive -LiteralPath $StagingPath -DestinationPath $ZipPath -Force
+Compress-ArchiveWithRetry -SourcePath $StagingPath -DestinationPath $ZipPath
 
 $zipHash = Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256
 Set-Content -LiteralPath $HashPath -Value "$($zipHash.Hash)  $(Split-Path -Leaf $ZipPath)" -Encoding ascii

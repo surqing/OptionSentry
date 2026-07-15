@@ -280,7 +280,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\package.ps1 -SkipTests -No
 
 ## 发布
 
-GitHub Actions 中的 [release.yml](.github/workflows/release.yml) 会在推送 `v*.*.*` 标签或手动触发时构建 Windows 包。发布标签需要和 [pyproject.toml](pyproject.toml) 中的 `version` 保持一致，例如 `version = "0.1.2"` 对应标签 `v0.1.2`。
+GitHub Actions 中的 [release.yml](.github/workflows/release.yml) 会在推送 `v*.*.*` 标签或手动触发时构建 Windows 包。发布标签需要和 [pyproject.toml](pyproject.toml) 中的 `version` 保持一致，例如 `version = "0.1.3"` 对应标签 `v0.1.3`。
 
 ## 注意事项
 
