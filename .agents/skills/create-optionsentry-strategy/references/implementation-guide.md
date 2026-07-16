@@ -52,7 +52,7 @@ Supported kinds are float, int, bool, string, and enum.
 
 Keep keys and values English because they are code and config contracts. Use Chinese labels for visible GUI text. Registration validates defaults, key shapes, enum choices, and label counts.
 
-Override validate_parameters() for relationships such as min_value < max_value. First call normalize_strategy_parameters() and then apply domain rules.
+Override validate_parameters() for cross-field relationships such as short_period < long_period. First call normalize_strategy_parameters() and then apply domain rules.
 
 ## Strategy Skeleton
 
@@ -126,7 +126,7 @@ DataRequirements currently supports last_price. A strategy declaring other quote
     id = "example_default"
     type = "example"
     name = "示例预警"
-    enabled = true
+    enabled = false
 
     [strategies.parameters]
     limit = 1.0
@@ -143,6 +143,7 @@ Do not add flat strategy parameters, threshold, selected, filter_script, or othe
 - Registry discovery and duplicate, type, and metadata validation.
 - Defaults, unknown keys, missing keys, types, bounds, enums, and cross-field validation.
 - Formula results on active, inactive, missing-price, and invalid-price inputs.
+- Strategy-specific trigger direction, boundary, and lifecycle behavior without assuming a range shape.
 - Compilation condition count, stable keys, exact required_symbols, and backtest_group.
 - Incremental evaluation only for changed relevant symbols.
 - Multiple instances of the same type with unique IDs.

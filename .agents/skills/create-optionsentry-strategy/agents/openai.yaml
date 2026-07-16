@@ -1,4 +1,4 @@
 interface:
   display_name: "创建 OptionSentry 策略"
-  short_description: "按本项目架构快速创建、接入、测试并验证新的期权预警策略"
-  default_prompt: "Use $create-optionsentry-strategy to add a new OptionSentry strategy from my requirements."
+  short_description: "澄清关键歧义，并按项目架构创建、测试和验证期权预警策略"
+  default_prompt: "Use $create-optionsentry-strategy to validate my requirements, clarify only blocking ambiguities, then implement and test the OptionSentry strategy."
